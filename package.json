@@ -1,0 +1,27 @@
+{
+  "name": "chattron",
+  "version": "1.0.0",
+  "description": "Electron Chat App For MCP Client",
+  "main": "src/main/main.js",
+  "scripts": {
+    "start": "electron .",
+    "dev:css": "tailwindcss -i ./src/renderer/styles.css -o ./public/output.css --watch"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/kilkat/ChatTron.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/kilkat/ChatTron/issues"
+  },
+  "homepage": "https://github.com/kilkat/ChatTron#readme",
+  "devDependencies": {
+    "autoprefixer": "^10.4.21",
+    "electron": "^36.3.1",
+    "postcss": "^8.5.3",
+    "tailwindcss": "^3.4.17"
+  }
+}
