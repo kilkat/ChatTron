@@ -13,83 +13,160 @@
     />
     <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
   </head>
-  <body class="bg-slate-50 min-h-screen font-sans" style='font-family: Inter, "Noto Sans", sans-serif;'>
-    <div class="relative flex flex-col min-h-screen overflow-x-hidden group/design-root">
-      <div class="layout-container flex flex-col h-full">
-        <!-- Header -->
-        <header class="flex items-center justify-between border-b border-[#e7edf4] px-10 py-3">
-          <div class="flex items-center gap-4 text-[#0d141c]">
-            <div class="w-4 h-4">
-              <img src="../assets/icons/logo.svg" alt="ChatTron" class="w-full h-full" />
-            </div>
-            <h2 class="text-lg font-bold tracking-[-0.015em]">ChatTron</h2>
-          </div>
-          <div class="flex flex-1 justify-end gap-8">
-            <button class="flex items-center justify-center h-10 px-2.5 bg-[#e7edf4] text-sm font-bold rounded-lg text-[#0d141c] gap-2">
-              <img src="../assets/icons/gear.svg" width="20" height="20" alt="Settings" />
+  <body
+    class="h-screen font-sans flex flex-col"
+    style="font-family: Inter, 'Noto Sans', sans-serif"
+  >
+    <!-- Header -->
+    <header
+      class="flex items-center justify-between border-b border-[#e7edf4] px-10 py-3"
+    >
+      <div class="flex items-center gap-4 text-[#0d141c]">
+        <div class="w-4 h-4">
+          <img
+            src="../assets/icons/logo.svg"
+            alt="ChatTron"
+            class="w-full h-full"
+          />
+        </div>
+        <h2 class="text-lg font-bold tracking-[-0.015em]">ChatTron</h2>
+      </div>
+      <div class="flex flex-1 justify-end gap-8">
+        <div class="relative">
+          <button
+            id="settings-btn"
+            class="flex items-center justify-center h-10 px-2.5 bg-[#e7edf4] text-sm font-bold rounded-lg text-[#0d141c] gap-2"
+          >
+            <img
+              src="../assets/icons/gear.svg"
+              width="20"
+              height="20"
+              alt="Settings"
+            />
+          </button>
+          <div
+            id="dropdown-menu"
+            class="absolute right-0 mt-2 w-40 bg-white border rounded-lg shadow-lg hidden z-50"
+          >
+            <button
+              id="api-settings-link"
+              class="block w-full text-left px-4 py-2 text-sm hover:bg-gray-100"
+            >
+              API Settings
             </button>
-            <div class="w-10 h-10 rounded-full bg-center bg-cover bg-no-repeat" style="background-image: url('https://lh3.googleusercontent.com/...')"></div>
           </div>
-        </header>
+        </div>
+        <div
+          class="w-10 h-10 rounded-full bg-center bg-cover bg-no-repeat"
+          style="background-image: url('https://lh3.googleusercontent.com/...')"
+        ></div>
+      </div>
+    </header>
 
-        <!-- Body Content -->
-        <div class="flex flex-1 gap-1 px-6 py-5 justify-center">
-          <!-- Sidebar -->
-          <div class="flex flex-col w-80">
-            <div class="flex flex-col justify-between h-full min-h-[700px] p-4 bg-slate-50">
-              <div class="flex flex-col gap-4">
-                <div class="flex flex-col gap-2">
-                  <!-- New Chat -->
-                  <div class="flex items-center gap-3 px-3 py-2 rounded-lg bg-[#e7edf4]">
-                    <img src="../assets/icons/plus.svg" width="24" height="24" alt="New Chat" />
-                    <p class="text-sm font-medium text-[#0d141c]">New Chat</p>
-                  </div>
-                  <!-- History -->
-                  <div class="flex items-center gap-3 px-3 py-2">
-                    <img src="../assets/icons/history.svg" width="24" height="24" alt="History" />
-                    <p class="text-sm font-medium text-[#0d141c]">History</p>
-                  </div>
-                  <!-- Help -->
-                  <div class="flex items-center gap-3 px-3 py-2">
-                    <img src="../assets/icons/help.svg" width="24" height="24" alt="Help" />
-                    <p class="text-sm font-medium text-[#0d141c]">Help</p>
-                  </div>
-                </div>
-              </div>
+    <!-- Main Content -->
+    <div class="flex flex-1 overflow-hidden">
+      <!-- Sidebar -->
+      <div class="w-80 flex flex-col p-4 bg-slate-50 border-r border-gray-200">
+        <div class="flex flex-col gap-4">
+          <div class="flex flex-col gap-2">
+            <div
+              id="new-chat"
+              class="flex items-center gap-3 px-3 py-2 rounded-lg bg-[#e7edf4] cursor-pointer"
+            >
+              <img
+                src="../assets/icons/plus.svg"
+                width="24"
+                height="24"
+                alt="New Chat"
+              />
+              <p class="text-sm font-medium text-[#0d141c]">New Chat</p>
             </div>
-          </div>
 
-          <!-- Main Chat Panel -->
-          <div class="flex flex-col flex-1 max-w-[960px]">
-            <h2 class="text-[28px] font-bold text-center pt-5 pb-3 px-4 text-[#0d141c]">Welcome to ChatTron</h2>
-            <p class="text-base font-normal text-center pb-3 pt-1 px-4 text-[#0d141c]">Start a new chat or continue from your history.</p>
+            <!-- ✅ History section header -->
+            <div id="history-section" class="flex items-center gap-3 px-3 py-2">
+              <img
+                src="../assets/icons/history.svg"
+                width="24"
+                height="24"
+                alt="History"
+              />
+              <p class="text-sm font-medium text-[#0d141c]">History</p>
+            </div>
 
-            <!-- Prompt Input -->
-            <div class="flex items-center gap-3 px-4 py-3 @container">
-              <label class="flex flex-col flex-1 min-w-40 h-12">
-                <div class="flex w-full h-full rounded-lg">
-                  <input
-                    placeholder="Type your prompt here..."
-                    class="form-input w-full resize-none rounded-l-lg text-[#0d141c] bg-[#e7edf4] px-4 border-none focus:outline-none placeholder:text-[#49739c]"
-                  />
-                  <div class="flex items-center bg-[#e7edf4] pr-4 rounded-r-lg">
-                    <div class="flex items-center gap-4">
-                      <!-- Attach Button -->
-                      <button class="min-w-[24px] min-h-[24px]">
-                        <img src="../assets/icons/attach.svg" width="24" height="24" alt="Attach" class="w-5 h-5" />
-                      </button>
-                      <!-- Send Button -->
-                      <button class="hidden @[480px]:block h-8 px-4 min-w-[84px] bg-[#0c7ff2] text-slate-50 text-sm font-medium rounded-lg">
-                        <span class="truncate">Send</span>
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              </label>
+            <!-- ✅ History panel will be injected here -->
+            <div
+              id="history-panel"
+              class="flex flex-col gap-1 overflow-y-auto max-h-[400px] pl-8"
+            >
+              <!-- JS가 이곳에 히스토리 목록 추가 -->
+            </div>
+
+            <div class="flex items-center gap-3 px-3 py-2">
+              <img
+                src="../assets/icons/help.svg"
+                width="24"
+                height="24"
+                alt="Help"
+              />
+              <p class="text-sm font-medium text-[#0d141c]">Help</p>
             </div>
           </div>
         </div>
       </div>
+
+      <!-- Chat Area -->
+      <div class="flex flex-col flex-1 max-w-[960px] mx-auto overflow-hidden">
+        <!-- Chat Panel -->
+        <div
+          class="flex-1 overflow-y-auto px-4 py-3 gap-2 flex flex-col"
+          id="chat-panel"
+        >
+          <h2
+            class="text-[28px] font-bold text-center pt-5 pb-3 text-[#0d141c]"
+          >
+            Welcome to ChatTron
+          </h2>
+          <p class="text-base font-normal text-center pb-3 pt-1 text-[#0d141c]">
+            Start a new chat or continue from your history.
+          </p>
+        </div>
+
+        <!-- Input Box -->
+        <div class="px-4 pt-5 pb-3 border-t bg-white">
+          <div class="flex items-center gap-3">
+            <label class="flex flex-col flex-1 min-w-40 h-12">
+              <div class="flex w-full h-full rounded-lg">
+                <input
+                  id="prompt-input"
+                  placeholder="Type your prompt here..."
+                  class="form-input w-full resize-none rounded-l-lg text-[#0d141c] bg-[#e7edf4] px-4 border-none focus:outline-none placeholder:text-[#49739c]"
+                />
+                <div class="flex items-center bg-[#e7edf4] pr-4 rounded-r-lg">
+                  <div class="flex items-center gap-4">
+                    <button class="min-w-[24px] min-h-[24px]">
+                      <img
+                        src="../assets/icons/attach.svg"
+                        width="24"
+                        height="24"
+                        alt="Attach"
+                        class="w-5 h-5"
+                      />
+                    </button>
+                    <button
+                      id="send-btn"
+                      class="h-8 px-4 min-w-[84px] bg-[#0c7ff2] text-slate-50 text-sm font-medium rounded-lg"
+                    >
+                      <span class="truncate">Send</span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </label>
+          </div>
+        </div>
+      </div>
     </div>
+
+    <script src="../src/renderer/app.js"></script>
   </body>
 </html>

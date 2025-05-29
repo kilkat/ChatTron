@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>ChatTron Settings</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+  </head>
+  <body class="bg-slate-50 flex justify-center items-center h-screen">
+    <div class="bg-white shadow-xl p-6 rounded-lg w-full max-w-md">
+      <h1 class="text-xl font-bold mb-4">🔧 ChatTron Settings</h1>
+
+      <div class="flex flex-col gap-3">
+        <select id="provider" class="p-2 border rounded">
+          <option value="">Select Provider</option>
+          <option value="openai">OpenAI</option>
+          <option value="ollama">Ollama</option>
+          <option value="localfastapi">Local FastAPI</option>
+          <option value="anthropic">Anthropic</option>
+          <option value="custom">Custom</option>
+        </select>
+
+        <input
+          id="api-url"
+          type="text"
+          placeholder="API Base URL (auto-filled)"
+          class="p-2 border rounded"
+        />
+
+        <select id="model-name" class="p-2 border rounded">
+          <option value="">Select Model</option>
+        </select>
+
+        <input
+          id="custom-model-name"
+          type="text"
+          placeholder="Enter custom model name"
+          class="p-2 border rounded hidden"
+        />
+
+        <input
+          id="api-key"
+          type="text"
+          placeholder="API Key (optional)"
+          class="p-2 border rounded"
+        />
+
+        <button id="save-btn" class="bg-blue-600 text-white p-2 rounded mt-4">
+          Save & Go to Chat
+        </button>
+        <button id="back-btn" class="bg-gray-300 text-gray-800 p-2 rounded">
+          Back
+        </button>
+      </div>
+    </div>
+
+    <script src="../src/renderer/settings.js"></script>
+  </body>
+</html>
