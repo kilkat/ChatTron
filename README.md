@@ -1,6 +1,10 @@
-# ChatTron  
-Electron Chat App For MCP Client  
+# ChatTron
 
-# How to Use  
-1. npm run dev:css -> you can make output.css
-2. npm start -> run chattron
+Electron Chat App For MCP Client
+
+# How to Use
+
+1. cd ChatTron
+2. npm install -> install modules
+3. npm run dev:css -> you can make output.css
+4. npm start -> run chattron

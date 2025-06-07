@@ -22,7 +22,7 @@
       class="flex items-center justify-between border-b border-[#e7edf4] px-10 py-3"
     >
       <div class="flex items-center gap-4 text-[#0d141c]">
-        <div class="w-4 h-4">
+        <div class="w-6 h-6">
           <img
             src="../assets/icons/logo.svg"
             alt="ChatTron"
@@ -31,6 +31,7 @@
         </div>
         <h2 class="text-lg font-bold tracking-[-0.015em]">ChatTron</h2>
       </div>
+
       <div class="flex flex-1 justify-end gap-8">
         <div class="relative">
           <button
@@ -82,6 +83,24 @@
               <p class="text-sm font-medium text-[#0d141c]">New Chat</p>
             </div>
 
+            <!-- MCP section header -->
+            <div
+              id="mcp-section"
+              class="flex items-center gap-3 px-3 py-2 mt-4 cursor-pointer"
+            >
+              <img
+                src="../assets/icons/plug.svg"
+                width="24"
+                height="24"
+                alt="MCP"
+              />
+              <p class="text-sm font-medium text-[#0d141c]">MCP Settings</p>
+            </div>
+            <div
+              id="mcp-panel"
+              class="flex flex-col gap-1 overflow-y-auto max-h-[400px] pl-8"
+            ></div>
+
             <!-- History section header -->
             <div id="history-section" class="flex items-center gap-3 px-3 py-2">
               <img
@@ -98,7 +117,7 @@
               id="history-panel"
               class="flex flex-col gap-1 overflow-y-auto max-h-[400px] pl-8"
             >
-              <!-- JS가 이곳에 히스토리 목록 추가 -->
+              <!-- History Lists-->
             </div>
 
             <div class="flex items-center gap-3 px-3 py-2">

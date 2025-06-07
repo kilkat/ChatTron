@@ -5,7 +5,33 @@
   "main": "src/main/main.js",
   "scripts": {
     "start": "electron .",
-    "dev:css": "tailwindcss -i ./src/renderer/styles.css -o ./public/output.css --watch"
+    "dev:css": "tailwindcss -i ./src/renderer/styles.css -o ./public/output.css --watch",
+    "build": "electron-builder"
+  },
+  "build": {
+    "appId": "com.kilkat.chattron",
+    "productName": "ChatTron",
+    "files": [
+      "assets/**/*",
+      "src/**/*",
+      "public/**/*",
+      "preload.js",
+      "package.json"
+    ],
+    "directories": {
+      "output": "dist"
+    },
+    "win": {
+      "target": "nsis",
+      "icon": "assets/favicon/logo.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "installerIcon": "assets/favicon/logo_256.ico",
+      "uninstallerIcon": "assets/favicon/logo_256.ico"
+    }
   },
   "repository": {
     "type": "git",
@@ -21,7 +47,11 @@
   "devDependencies": {
     "autoprefixer": "^10.4.21",
     "electron": "^36.3.1",
+    "electron-builder": "^24.13.3",
     "postcss": "^8.5.3",
     "tailwindcss": "^3.4.17"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.12.1"
   }
 }
