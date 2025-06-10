@@ -45,11 +45,8 @@ document.addEventListener("DOMContentLoaded", () => {
 
   // 3. 저장 버튼 → MCP 서버 추가 및 활성화
   saveBtn.addEventListener("click", async () => {
-    const key = keyInput.value.trim();
-    if (!key) return alert("Key is required");
-
     const server = {
-      key,
+      key: keyInput.value.trim(),
       name: nameInput.value.trim(),
       description: descInput.value.trim(),
       command: cmdInput.value.trim(),
@@ -59,22 +56,57 @@ document.addEventListener("DOMContentLoaded", () => {
         .filter(Boolean),
     };
 
-    // 1. 기존 서버 목록을 sessionStorage에서 가져오기
-    let serverList = JSON.parse(sessionStorage.getItem("mcpServers")) || [];
+    // 필수 필드 검증
+    if (!server.key) {
+      return alert("Key is required");
+    }
 
-    // 2. 새로운 서버를 목록에 추가
-    serverList.push(server);
+    if (!server.command) {
+      return alert("Command is required");
+    }
 
-    // 3. 업데이트된 서버 목록을 sessionStorage에 저장
+    console.log("Saving server configuration:", server);
+
+    // sessionStorage에 서버 목록 업데이트
+    let serverList =
+      JSON.parse(sessionStorage.getItem("mcp-server-list")) || [];
+
+    // 기존 서버가 있으면 업데이트, 없으면 추가
+    const existingIndex = serverList.findIndex((s) => s.key === server.key);
+    if (existingIndex >= 0) {
+      serverList[existingIndex] = server;
+    } else {
+      serverList.push(server);
+    }
+
     sessionStorage.setItem("mcp-server-list", JSON.stringify(serverList));
 
     try {
-      const result = await window.mcpAPI.addServer(server);
-      await window.mcpAPI.activate(key);
-      alert("Server saved and activated.");
+      // 서버 설정 저장
+      try {
+        await window.mcpAPI.addServer(server);
+      } catch (e) {
+        if (/already exists/.test(e.message)) {
+          await window.mcpAPI.updateServer(server);
+        } else {
+          throw e;
+        }
+      }
+
+      // 서버 활성화
+      await window.mcpAPI.activate(server);
+      alert("Server saved and activated successfully.");
+
+      // 활성화된 클라이언트 목록 업데이트
+      let activeClients =
+        JSON.parse(sessionStorage.getItem("active-clients")) || [];
+      if (!activeClients.includes(server.key)) {
+        activeClients.push(server.key);
+        sessionStorage.setItem("active-clients", JSON.stringify(activeClients));
+      }
     } catch (err) {
+      console.error("Save/activate error:", err);
       alert("Failed to save or activate: " + err.message);
-      console.error(err);
     }
 
     updateJsonPreview();
@@ -85,34 +117,75 @@ document.addEventListener("DOMContentLoaded", () => {
     const selectedKey = sessionStorage.getItem("selected-mcp-key");
     if (!selectedKey) return alert("No MCP selected to delete");
 
-    console.log(`Attempting to remove server with key: ${selectedKey}`);
-
-    let serverList =
-      JSON.parse(sessionStorage.getItem("mcp-server-list")) || [];
-
-    serverList = serverList.filter((server) => server.key !== selectedKey);
-
-    sessionStorage.setItem("mcp-server-list", JSON.stringify(serverList));
-
-    sessionStorage.removeItem("selected-mcp-key");
+    console.log(`🗑️ Starting deletion process for server: ${selectedKey}`);
 
     try {
-      await window.mcpAPI.removeServer(selectedKey);
-      alert("Server deleted.");
+      // 🎯 백엔드에서 서버 제거
+      const result = await window.mcpAPI.removeServer(selectedKey);
+      console.log(`✅ Backend removal result: ${result}`);
 
-      // 서버 항목을 UI에서 제거
-      const serverItem = document.querySelector(
-        `[data-server-key="${selectedKey}"]`
+      // 🎯 백엔드 성공 후 프론트엔드 정리
+      console.log(`🧹 Cleaning up frontend storage for: ${selectedKey}`);
+
+      // serverList에서 제거
+      let serverList =
+        JSON.parse(sessionStorage.getItem("mcp-server-list")) || [];
+      const originalLength = serverList.length;
+      serverList = serverList.filter((server) => server.key !== selectedKey);
+      console.log(
+        `📋 Removed from serverList: ${originalLength} → ${serverList.length}`
       );
-      if (serverItem) {
-        serverItem.remove();
-      }
+      sessionStorage.setItem("mcp-server-list", JSON.stringify(serverList));
 
-      // 서버 목록 업데이트
-      window.location.reload();
+      // activeClients에서 제거
+      let activeClients =
+        JSON.parse(sessionStorage.getItem("active-clients")) || [];
+      const originalActiveLength = activeClients.length;
+      activeClients = activeClients.filter((key) => key !== selectedKey);
+      console.log(
+        `🔗 Removed from activeClients: ${originalActiveLength} → ${activeClients.length}`
+      );
+      sessionStorage.setItem("active-clients", JSON.stringify(activeClients));
+
+      // 선택된 키 정리
+      sessionStorage.removeItem("selected-mcp-key");
+      console.log(`🔑 Cleared selected-mcp-key`);
+
+      alert("✅ Server deleted successfully!");
+
+      // 3. 메인 페이지로 리다이렉트
+      console.log(`🔄 Redirecting to main page...`);
+      window.location.href = "index.html";
     } catch (err) {
-      alert("Failed to delete server: " + err.message);
-      console.error(err);
+      console.error("❌ Failed to delete server:", err);
+
+      // 사용자에게 더 친화적인 메시지 표시 -> 해당 메세지로 인해 사용자 혼란 가중 -> 실제 기능 동작에는 문제 없음 확인
+      // const userMessage = err.message.includes("not found")
+      //   ? `Server "${selectedKey}" was already removed or doesn't exist.`
+      //   : `Failed to delete server: ${err.message}`;
+
+      // alert(userMessage);
+
+      // "not found" 오류의 경우 프론트엔드만 정리하고 계속 진행
+      if (err.message.includes("not found")) {
+        console.log(
+          `🔄 Cleaning up frontend only for non-existent server: ${selectedKey}`
+        );
+
+        let serverList =
+          JSON.parse(sessionStorage.getItem("mcp-server-list")) || [];
+        serverList = serverList.filter((server) => server.key !== selectedKey);
+        sessionStorage.setItem("mcp-server-list", JSON.stringify(serverList));
+
+        let activeClients =
+          JSON.parse(sessionStorage.getItem("active-clients")) || [];
+        activeClients = activeClients.filter((key) => key !== selectedKey);
+        sessionStorage.setItem("active-clients", JSON.stringify(activeClients));
+
+        sessionStorage.removeItem("selected-mcp-key");
+
+        window.location.href = "index.html";
+      }
     }
   });
 

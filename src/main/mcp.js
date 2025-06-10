@@ -80,31 +80,78 @@ class MCPManager {
   }
 
   // Activate and connect to an MCP tool server
-  async activate(server) {
-    // Create a new MCP client instance with a unique name and version
-    const client = new Client({ name: server.key, version: "1.0.0" });
+  async activate(serverOrKey) {
+    let server;
 
-    // Create a Stdio transport that runs the specified command and arguments
-    const transport = new StdioClientTransport({
+    if (typeof serverOrKey === "string") {
+      // key로 전달된 경우, config에서 서버 정보 조회
+      const config = this.getConfig();
+      server = config.mcpServers[serverOrKey];
+
+      if (!server) {
+        throw new Error(`Server ${serverOrKey} not found in configuration`);
+      }
+
+      // key 필드가 없으면 추가
+      if (!server.key) {
+        server.key = serverOrKey;
+      }
+    } else {
+      // 서버 객체로 전달된 경우
+      server = serverOrKey;
+    }
+
+    // 필수 필드 검증
+    if (!server.command) {
+      throw new Error(
+        `Server ${server.key} is missing required 'command' field`
+      );
+    }
+
+    if (!server.args) {
+      server.args = []; // args가 없으면 빈 배열로 초기화
+    }
+
+    console.log("Activating MCP server:", {
+      key: server.key,
       command: server.command,
       args: server.args,
-      env: {
-        ...getDefaultEnvironment(), // Clean environment
-        PATH: process.env.PATH || "",
-      },
-      stderr: process.platform === "win32" ? "pipe" : "inherit", // Pipe stderr only on Windows
     });
 
-    // Establish connection between client and tool server
-    await client.connect(transport);
+    try {
+      // Create a new MCP client instance with a unique name and version
+      const client = new Client({ name: server.key, version: "1.0.0" });
 
-    // Track the connected client instance
-    this.clients[server.key] = client;
+      // Create a Stdio transport that runs the specified command and arguments
+      const transport = new StdioClientTransport({
+        command: server.command,
+        args: server.args || [],
+        env: {
+          ...getDefaultEnvironment(), // Clean environment
+          PATH: process.env.PATH || "",
+        },
+        stderr: process.platform === "win32" ? "pipe" : "inherit", // Pipe stderr only on Windows
+      });
 
-    // Mark this server as active in the config
-    const config = this.getConfig();
-    config.mcpServers[server.key] = { ...server, isActive: true };
-    this.saveConfig(config);
+      // Establish connection between client and tool server
+      await client.connect(transport);
+
+      // Track the connected client instance
+      this.clients[server.key] = client;
+
+      // Mark this server as active in the config
+      const config = this.getConfig();
+      config.mcpServers[server.key] = { ...server, isActive: true };
+      this.saveConfig(config);
+
+      console.log(`Successfully activated MCP server: ${server.key}`);
+      return "Server activated successfully";
+    } catch (error) {
+      console.error(`Failed to activate MCP server ${server.key}:`, error);
+      throw new Error(
+        `Failed to activate server ${server.key}: ${error.message}`
+      );
+    }
   }
 
   // Gracefully close and deactivate a specific server
@@ -156,6 +203,33 @@ class MCPManager {
     config.mcpServers[server.key] = server;
     this.saveConfig(config);
     return true;
+  }
+
+  async removeServer(key) {
+    console.log(`Removing server: ${key}`);
+
+    try {
+      // 1. 서버가 활성화되어 있다면 먼저 비활성화
+      if (this.clients[key]) {
+        await this.deactivate(key);
+        console.log(`✅ Deactivated server: ${key}`);
+      }
+
+      // 2. 설정 파일에서 서버 제거
+      const config = this.getConfig();
+      if (config.mcpServers && config.mcpServers[key]) {
+        delete config.mcpServers[key];
+        this.saveConfig(config);
+        console.log(`✅ Removed server ${key} from configuration`);
+        return true;
+      } else {
+        console.warn(`⚠️ Server ${key} not found in configuration`);
+        return false;
+      }
+    } catch (error) {
+      console.error(`❌ Failed to remove server ${key}:`, error);
+      throw error;
+    }
   }
 }
 

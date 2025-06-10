@@ -30,8 +30,9 @@ contextBridge.exposeInMainWorld("settingsAPI", {
 
 contextBridge.exposeInMainWorld("mcpAPI", {
   addServer: (server) => ipcRenderer.invoke("mcp-add-server", server),
+  updateServer: (server) => ipcRenderer.invoke("mcp-update-server", server),
   getConfig: () => ipcRenderer.invoke("mcp-get-config"),
-  activate: (key) => ipcRenderer.invoke("mcp-activate", key),
+  activate: (keyOrServer) => ipcRenderer.invoke("mcp-activate", keyOrServer),
   deactivate: (key) => ipcRenderer.invoke("mcp-deactivate", key),
   removeServer: (key) => ipcRenderer.invoke("remove-server", key),
   listTools: (key) => ipcRenderer.invoke("mcp-list-tools", key),

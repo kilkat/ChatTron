@@ -70,7 +70,21 @@ User request:
 
   // ✅ JSON 추출 함수
   function extractValidJsonFromText(text) {
-    // 1. Markdown code block 추출
+    console.log("🔍 Extracting JSON from text:", text);
+
+    // 1. 전체 텍스트가 JSON인지 먼저 확인 (가장 일반적인 경우)
+    try {
+      const trimmedText = text.trim();
+      const parsed = JSON.parse(trimmedText);
+      if (parsed.client && parsed.toolName && typeof parsed.args === "object") {
+        console.log("✅ Direct JSON parse successful:", parsed);
+        return parsed;
+      }
+    } catch (e) {
+      console.log("⚠️ Direct JSON parse failed, trying alternatives...");
+    }
+
+    // 2. Markdown code block 추출
     const markdownMatch = text.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
     if (markdownMatch) {
       try {
@@ -80,40 +94,114 @@ User request:
           parsed.toolName &&
           typeof parsed.args === "object"
         ) {
+          console.log("✅ Markdown JSON parse successful:", parsed);
           return parsed;
         }
       } catch (e) {
         console.warn(
-          "⚠️ JSON parse failed from markdown block:\n",
+          "⚠️ JSON parse failed from markdown block:",
           markdownMatch[1]
         );
       }
     }
 
-    // 2. 중괄호 블록 fallback
-    const matches = [...text.matchAll(/\{[\s\S]*?\}/g)];
-    for (const match of matches) {
+    // 3. 중괄호 블록 fallback (여러 JSON 객체가 있을 수 있음)
+    const jsonBlocks = [...text.matchAll(/\{[\s\S]*?\}/g)];
+    console.log(`🔍 Found ${jsonBlocks.length} potential JSON blocks`);
+
+    for (const match of jsonBlocks) {
       try {
-        const json = JSON.parse(match[0]);
+        const jsonText = match[0];
+        console.log("🧪 Testing JSON block:", jsonText);
+        const json = JSON.parse(jsonText);
+
         if (json.client && json.toolName && typeof json.args === "object") {
+          console.log("✅ JSON block parse successful:", json);
           return json;
         }
       } catch (e) {
+        console.log("⚠️ JSON block parse failed:", e.message);
         continue;
       }
     }
 
+    // 4. 더 관대한 JSON 추출 시도 (줄바꿈과 공백 처리)
+    const lines = text.split("\n");
+    let jsonStart = -1;
+    let jsonEnd = -1;
+    let braceCount = 0;
+
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i].trim();
+      if (line.startsWith("{") && jsonStart === -1) {
+        jsonStart = i;
+        braceCount = 1;
+      } else if (jsonStart !== -1) {
+        braceCount += (line.match(/\{/g) || []).length;
+        braceCount -= (line.match(/\}/g) || []).length;
+
+        if (braceCount === 0) {
+          jsonEnd = i;
+          break;
+        }
+      }
+    }
+
+    if (jsonStart !== -1 && jsonEnd !== -1) {
+      try {
+        const jsonText = lines.slice(jsonStart, jsonEnd + 1).join("\n");
+        console.log("🧪 Testing multi-line JSON:", jsonText);
+        const parsed = JSON.parse(jsonText);
+
+        if (
+          parsed.client &&
+          parsed.toolName &&
+          typeof parsed.args === "object"
+        ) {
+          console.log("✅ Multi-line JSON parse successful:", parsed);
+          return parsed;
+        }
+      } catch (e) {
+        console.warn("⚠️ Multi-line JSON parse failed:", e.message);
+      }
+    }
+
+    console.log("❌ No valid JSON found in text");
     return null;
   }
 
   try {
     console.log("🛰️ Sending request to LLM:", { apiUrl, modelName, provider });
+    console.log("📤 Request payload:", JSON.stringify(payload, null, 2));
+    console.log("📤 Request headers:", headers);
+
+    // 요청 시작 시간 기록
+    const startTime = Date.now();
 
     const res = await fetch(apiUrl, {
       method: "POST",
       headers,
       body: JSON.stringify(payload),
     });
+
+    const responseTime = Date.now() - startTime;
+    console.log(`⏱️ Response received in ${responseTime}ms`);
+    console.log("📊 Response status:", res.status, res.statusText);
+    console.log(
+      "📋 Response headers:",
+      Object.fromEntries(res.headers.entries())
+    );
+
+    // 응답이 성공적이지 않은 경우
+    if (!res.ok) {
+      const errorText = await res.text();
+      console.error("❌ HTTP Error Response:", {
+        status: res.status,
+        statusText: res.statusText,
+        body: errorText,
+      });
+      throw new Error(`HTTP ${res.status}: ${errorText}`);
+    }
 
     const data = await res.json();
 
@@ -139,14 +227,6 @@ User request:
       const validTool = toolList.includes(parsed.toolName);
       if (validClient && validTool) {
         console.log("✅ Parsed and validated JSON:", parsed);
-
-        // 🚨 URL 자동 보정
-        // if (parsed.args?.url && typeof parsed.args.url === "string") {
-        //   if (!/^https?:\/\//i.test(parsed.args.url)) {
-        //     parsed.args.url = "https://" + parsed.args.url;
-        //   }
-        // }
-
         return parsed;
       } else {
         console.warn(
@@ -161,27 +241,188 @@ User request:
     return null;
   } catch (err) {
     console.error("🚨 LLM tool matching error:", err);
+
+    // 네트워크 오류인지 확인
+    if (err instanceof TypeError && err.message.includes("fetch")) {
+      console.error("🌐 Network error - check if the API URL is accessible");
+    }
+
+    // 타임아웃 오류인지 확인
+    if (err.name === "AbortError") {
+      console.error("⏰ Request timed out");
+    }
+
     return null;
   }
 }
 
+// 수정된 MCP 동기화 코드 -> 기존에 Session Storage 삭제도 제대로 안되었고, 동기화에 문제가 있어 토글을 꺼도 MCP가 활성화 되어 있는 상태로 남아 있는 경우가 있었음
+// 1. 개선된 buildMCPRegistry 함수 - sessionStorage 기반으로 변경
 async function buildMCPRegistry() {
   mcpToolRegistry = {};
-  const activeClients = await window.mcpAPI.getClients();
 
-  for (const client of activeClients) {
-    const clientKey = client?.key || client; // 문자열이면 그대로, 객체면 key 사용
+  // sessionStorage에서 활성화된 클라이언트 목록 가져오기
+  const activeClients =
+    JSON.parse(sessionStorage.getItem("active-clients")) || [];
+
+  console.log("🔧 Building registry for active clients:", activeClients);
+
+  for (const clientKey of activeClients) {
     try {
-      const { tools } = await window.mcpAPI.listTools(clientKey);
-      mcpToolRegistry[clientKey] = tools || [];
+      // 실제 백엔드에서 해당 클라이언트가 활성화되어 있는지 확인
+      const backendClients = await window.mcpAPI.getClients();
+
+      if (backendClients.includes(clientKey)) {
+        const { tools } = await window.mcpAPI.listTools(clientKey);
+        mcpToolRegistry[clientKey] = tools || [];
+        console.log(`✅ Added ${clientKey} with ${tools?.length || 0} tools`);
+      } else {
+        console.warn(`⚠️ Client ${clientKey} not active in backend, skipping`);
+        // sessionStorage에서도 제거
+        const updatedActiveClients = activeClients.filter(
+          (c) => c !== clientKey
+        );
+        sessionStorage.setItem(
+          "active-clients",
+          JSON.stringify(updatedActiveClients)
+        );
+      }
     } catch (err) {
-      console.warn("Tool fetch failed for:", clientKey, err);
+      console.warn(`❌ Tool fetch failed for ${clientKey}:`, err);
+      // 실패한 클라이언트는 registry에서 제외
     }
   }
 
-  console.log("Registry built:", Object.keys(mcpToolRegistry));
+  console.log("📋 Registry built:", Object.keys(mcpToolRegistry));
 }
 
+// 2. 개선된 updateMCPUI 함수 - 실제 백엔드와 동기화
+async function updateMCPUI() {
+  const panel = document.getElementById("mcp-panel");
+  if (!panel) return;
+
+  const serverList =
+    JSON.parse(sessionStorage.getItem("mcp-server-list")) || [];
+  const activeClients =
+    JSON.parse(sessionStorage.getItem("active-clients")) || [];
+
+  panel.innerHTML = "";
+
+  serverList.forEach((server) => {
+    const key = server.key;
+    const isActive = activeClients.includes(key);
+
+    const div = document.createElement("div");
+    div.className =
+      "flex items-center justify-between gap-2 px-3 py-2 hover:bg-gray-100 cursor-pointer text-sm";
+    div.innerHTML = `
+      <span>${server.name || key}</span>
+      <label class="inline-flex items-center cursor-pointer">
+        <input type="checkbox" class="sr-only peer" data-mcp-key="${key}" ${
+      isActive ? "checked" : ""
+    }>
+        <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:bg-green-500"></div>
+      </label>
+    `;
+
+    div.addEventListener("click", (e) => {
+      if (
+        e.target.closest("label") ||
+        e.target.tagName.toLowerCase() === "input"
+      ) {
+        return;
+      }
+      sessionStorage.setItem("selected-mcp-key", key);
+      window.location.href = "mcp.html";
+    });
+
+    panel.appendChild(div);
+  });
+
+  // 토글 이벤트 핸들러 - 실제 백엔드와 동기화
+  panel.querySelectorAll("input[data-mcp-key]").forEach((toggle) => {
+    toggle.onchange = async () => {
+      const key = toggle.dataset.mcpKey;
+      let activeClients =
+        JSON.parse(sessionStorage.getItem("active-clients")) || [];
+
+      try {
+        if (toggle.checked) {
+          console.log(`🔵 Activating MCP client: ${key}`);
+
+          // 백엔드에서 실제 활성화
+          await window.mcpAPI.activate(key);
+
+          // 성공하면 sessionStorage에 추가
+          if (!activeClients.includes(key)) {
+            activeClients.push(key);
+          }
+
+          console.log(`✅ Successfully activated: ${key}`);
+        } else {
+          console.log(`🔴 Deactivating MCP client: ${key}`);
+
+          // 백엔드에서 실제 비활성화
+          await window.mcpAPI.deactivate(key);
+
+          // 성공하면 sessionStorage에서 제거
+          activeClients = activeClients.filter((c) => c !== key);
+
+          console.log(`✅ Successfully deactivated: ${key}`);
+        }
+
+        // sessionStorage 업데이트
+        sessionStorage.setItem("active-clients", JSON.stringify(activeClients));
+
+        // Registry 재구성
+        await buildMCPRegistry();
+
+        // UI 재업데이트
+        updateMCPUI();
+      } catch (error) {
+        console.error(
+          `❌ Failed to ${toggle.checked ? "activate" : "deactivate"} ${key}:`,
+          error
+        );
+
+        // 실패시 토글 상태 되돌리기
+        toggle.checked = !toggle.checked;
+
+        alert(
+          `Failed to ${toggle.checked ? "activate" : "deactivate"} ${key}: ${
+            error.message
+          }`
+        );
+      }
+    };
+  });
+}
+
+// 3. 초기 동기화 함수 - 앱 시작시 백엔드와 sessionStorage 동기화
+async function syncMCPState() {
+  try {
+    console.log("🔄 Syncing MCP state...");
+
+    // 백엔드에서 실제 활성화된 클라이언트 목록 가져오기
+    const backendActiveClients = await window.mcpAPI.getClients();
+
+    // sessionStorage 업데이트
+    sessionStorage.setItem(
+      "active-clients",
+      JSON.stringify(backendActiveClients)
+    );
+
+    console.log("✅ MCP state synced:", backendActiveClients);
+
+    // Registry 빌드
+    await buildMCPRegistry();
+
+    // UI 업데이트
+    updateMCPUI();
+  } catch (error) {
+    console.error("❌ Failed to sync MCP state:", error);
+  }
+}
 function findMatchingTool(prompt) {
   const lower = prompt.toLowerCase();
 
@@ -228,6 +469,9 @@ function renderMessage(text, sender) {
   const welcomeText = chatPanel.querySelector("p");
   if (welcomeHeading) welcomeHeading.remove();
   if (welcomeText) welcomeText.remove();
+
+  // DOM 요소를 반환
+  return msg;
 }
 
 function getCurrentSessionId() {
@@ -340,130 +584,6 @@ function updateHistoryUI() {
   clearContainer.appendChild(clearBtn);
 }
 
-async function updateMCPUI() {
-  const panel = document.getElementById("mcp-panel");
-  if (!panel) return;
-
-  // sessionStorage에서 서버 목록 가져오기
-  const serverList =
-    JSON.parse(sessionStorage.getItem("mcp-server-list")) || [];
-  const activeClients =
-    JSON.parse(sessionStorage.getItem("active-clients")) || [];
-
-  panel.innerHTML = "";
-
-  // 서버 목록을 순회하며 UI 업데이트
-  serverList.forEach((server) => {
-    const key = server.key;
-    const isActive = activeClients.includes(key);
-
-    const div = document.createElement("div");
-
-    div.className =
-      "flex items-center justify-between gap-2 px-3 py-2 hover:bg-gray-100 cursor-pointer text-sm";
-    div.innerHTML = `
-      <span>${server.name || key}</span>
-      <label class="inline-flex items-center cursor-pointer">
-        <input type="checkbox" class="sr-only peer" data-mcp-key="${key}" ${
-      isActive ? "checked" : ""
-    }>
-        <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:bg-green-500"></div>
-      </label>
-    `;
-
-    div.addEventListener("click", (e) => {
-      if (
-        e.target.closest("label") ||
-        e.target.tagName.toLowerCase() === "input"
-      ) {
-        return;
-      }
-
-      sessionStorage.setItem("selected-mcp-key", key);
-      window.location.href = "mcp.html";
-    });
-
-    panel.appendChild(div);
-  });
-
-  // 토글 상태 변경 시 활성화/비활성화 처리
-  panel.querySelectorAll("input[data-mcp-key]").forEach((toggle) => {
-    toggle.onchange = async () => {
-      const key = toggle.dataset.mcpKey;
-      if (toggle.checked) {
-        // 활성화 시 activeClients에 추가
-        activeClients.push(key);
-      } else {
-        // 비활성화 시 activeClients에서 제거
-        const index = activeClients.indexOf(key);
-        if (index !== -1) {
-          activeClients.splice(index, 1);
-        }
-      }
-
-      // 변경된 활성화된 클라이언트를 sessionStorage에 저장
-      sessionStorage.setItem("active-clients", JSON.stringify(activeClients));
-
-      // MCP 상태 변경 시 tool 목록 갱신
-      await buildMCPRegistry(); // tool 목록 갱신 함수 호출
-      updateMCPUI(); // UI 업데이트
-    };
-  });
-}
-
-// async function updateMCPUI() {
-//   const panel = document.getElementById("mcp-panel");
-//   if (!panel || !window.mcpAPI) return;
-
-//   const config = await window.mcpAPI.getConfig();
-//   const activeClients = await window.mcpAPI.getClients();
-//   panel.innerHTML = "";
-
-//   Object.entries(config.mcpServers || {}).forEach(([key, server]) => {
-//     const div = document.createElement("div");
-//     const isActive = activeClients.includes(key);
-
-//     div.className =
-//       "flex items-center justify-between gap-2 px-3 py-2 hover:bg-gray-100 cursor-pointer text-sm";
-//     div.innerHTML = `
-//       <span>${server.name || key}</span>
-//       <label class="inline-flex items-center cursor-pointer">
-//         <input type="checkbox" class="sr-only peer" data-mcp-key="${key}" ${
-//       isActive ? "checked" : ""
-//     }>
-//         <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:bg-green-500"></div>
-//       </label>
-//     `;
-
-//     div.addEventListener("click", (e) => {
-//       if (
-//         e.target.closest("label") ||
-//         e.target.tagName.toLowerCase() === "input"
-//       ) {
-//         return;
-//       }
-
-//       sessionStorage.setItem("selected-mcp-key", key);
-//       window.location.href = "mcp.html";
-//     });
-
-//     panel.appendChild(div);
-//   });
-
-//   panel.querySelectorAll("input[data-mcp-key]").forEach((toggle) => {
-//     toggle.onchange = async () => {
-//       const key = toggle.dataset.mcpKey;
-//       if (toggle.checked) {
-//         await window.mcpAPI.activate(key);
-//       } else {
-//         await window.mcpAPI.deactivate(key);
-//       }
-//       await buildMCPRegistry(); // MCP 상태 변경 시 tool 목록 갱신
-//       updateMCPUI();
-//     };
-//   });
-// }
-
 document.addEventListener("DOMContentLoaded", async () => {
   const settingsBtn = document.getElementById("settings-btn");
   const dropdownMenu = document.getElementById("dropdown-menu");
@@ -498,10 +618,21 @@ document.addEventListener("DOMContentLoaded", async () => {
     console.warn("MCP Agent 자동 실행 실패:", err.message);
   }
 
-  await buildMCPRegistry();
-  updateMCPUI();
-  loadHistory();
-  updateHistoryUI();
+  console.log("🚀 Initializing ChatTron...");
+
+  try {
+    await syncMCPState();
+    loadHistory();
+    updateHistoryUI();
+    console.log("✅ ChatTron initialization complete");
+  } catch (error) {
+    console.error("❌ Initialization failed:", error);
+
+    await buildMCPRegistry();
+    updateMCPUI();
+    loadHistory();
+    updateHistoryUI();
+  }
 
   sendBtn?.addEventListener("click", async () => {
     const prompt = input.value.trim();
@@ -510,136 +641,250 @@ document.addEventListener("DOMContentLoaded", async () => {
     renderMessage(prompt, "user");
     input.value = "";
 
-    let match = findMatchingTool(prompt);
+    // 로딩 상태 표시 (안전하게)
+    let loadingMessage = null;
+    try {
+      loadingMessage = renderMessage("🤔 Thinking...", "system");
+    } catch (err) {
+      console.warn("Could not create loading message:", err);
+    }
 
-    // 🧠 자연어 기반 MCP 툴 매칭 (fallback)
-    if (!match) {
-      const llmMatch = await findToolViaLLM(prompt, mcpToolRegistry);
-      if (llmMatch?.client && llmMatch?.toolName) {
-        const toolList = mcpToolRegistry[llmMatch.client] || [];
-        const tool = toolList.find((t) => t.name === llmMatch.toolName);
-        if (tool) {
-          match = {
-            client: llmMatch.client,
-            tool,
-            args:
-              llmMatch.args || extractArgsFromPrompt(prompt, tool.inputSchema),
-          };
-        }
+    // 안전한 로딩 메시지 업데이트 함수
+    function updateLoadingMessage(text) {
+      if (loadingMessage && loadingMessage.textContent !== undefined) {
+        loadingMessage.textContent = text;
       }
     }
 
-    // ✅ MCP 실행
-    if (match) {
-      try {
-        const args =
-          match.args || extractArgsFromPrompt(prompt, match.tool.inputSchema);
-
-        console.log("MCP CALL DEBUG", {
-          client: match.client,
-          name: match.tool.name,
-          args,
-        });
-
-        const result = await window.mcpAPI.callTool({
-          client: match.client,
-          name: match.tool.name,
-          args,
-        });
-
-        renderMessage(
-          `[MCP:${match.client}] ${JSON.stringify(result)}`,
-          "assistant"
-        );
-        saveToHistory(prompt, JSON.stringify(result));
-      } catch (err) {
-        renderMessage("MCP Error: " + err.message, "system");
+    // 안전한 로딩 메시지 제거 함수
+    function removeLoadingMessage() {
+      if (loadingMessage && loadingMessage.parentNode) {
+        loadingMessage.remove();
       }
-      return;
     }
-
-    // ❗ fallback: LLM chat
-    const settings =
-      window.settingsAPI?.load?.() ||
-      JSON.parse(localStorage.getItem("chattron-settings") || "{}");
-
-    const { apiUrl, modelName, apiKey, provider } = settings;
-    if (!apiUrl || !modelName || !provider) {
-      renderMessage("API setting is missing.", "system");
-      return;
-    }
-
-    let payload = {};
-    let reply = "";
 
     try {
-      switch (provider) {
-        case "openai":
-        case "ollama":
-        case "localfastapi":
-        case "custom":
-          payload = {
-            model: modelName,
-            messages: [
-              { role: "system", content: "You are a helpful assistant." },
-              { role: "user", content: prompt },
-            ],
-            stream: false,
-          };
-          break;
-        case "anthropic":
-          payload = {
-            model: modelName,
-            messages: [{ role: "user", content: prompt }],
-            stream: false,
-            max_tokens: 1024,
-          };
-          break;
-        default:
-          renderMessage("Unsupported provider.", "system");
-          return;
+      let match = findMatchingTool(prompt);
+
+      // 🧠 자연어 기반 MCP 툴 매칭 (fallback)
+      if (!match) {
+        console.log("🔍 No direct tool match found, trying LLM matching...");
+
+        updateLoadingMessage("🧠 Analyzing request with LLM...");
+
+        const llmMatch = await findToolViaLLM(prompt, mcpToolRegistry);
+
+        if (llmMatch?.client && llmMatch?.toolName) {
+          console.log("✅ LLM found tool match:", llmMatch);
+          const toolList = mcpToolRegistry[llmMatch.client] || [];
+          const tool = toolList.find((t) => t.name === llmMatch.toolName);
+          if (tool) {
+            match = {
+              client: llmMatch.client,
+              tool,
+              args:
+                llmMatch.args ||
+                extractArgsFromPrompt(prompt, tool.inputSchema),
+            };
+          }
+        } else {
+          console.log("❌ LLM could not find a suitable tool match");
+        }
       }
 
-      const headers = {
-        "Content-Type": "application/json",
-        ...(apiKey && { Authorization: `Bearer ${apiKey}` }),
-      };
+      // 로딩 메시지 제거
+      removeLoadingMessage();
 
-      const res = await fetch(apiUrl, {
-        method: "POST",
-        headers,
-        body: JSON.stringify(payload),
+      // ✅ MCP 실행
+      if (match) {
+        console.log("🛠️ Executing MCP tool...");
+        const executingMessage = renderMessage(
+          "🛠️ Executing tool...",
+          "system"
+        );
+
+        try {
+          const args =
+            match.args || extractArgsFromPrompt(prompt, match.tool.inputSchema);
+
+          console.log("MCP CALL DEBUG", {
+            client: match.client,
+            name: match.tool.name,
+            args,
+          });
+
+          const result = await window.mcpAPI.callTool({
+            client: match.client,
+            name: match.tool.name,
+            args,
+          });
+
+          // 실행 메시지 제거
+          if (executingMessage && executingMessage.parentNode) {
+            executingMessage.remove();
+          }
+
+          renderMessage(
+            `[MCP:${match.client}] ${JSON.stringify(result, null, 2)}`,
+            "assistant"
+          );
+          saveToHistory(prompt, JSON.stringify(result));
+        } catch (err) {
+          console.error("MCP execution error:", err);
+
+          // 실행 메시지 제거
+          if (executingMessage && executingMessage.parentNode) {
+            executingMessage.remove();
+          }
+
+          renderMessage("MCP Error: " + err.message, "system");
+        }
+        return;
+      }
+
+      // ❗ fallback: LLM chat
+      console.log("💬 Falling back to direct LLM chat...");
+      const chatMessage = renderMessage(
+        "💬 Using direct LLM chat...",
+        "system"
+      );
+
+      const settings =
+        window.settingsAPI?.load?.() ||
+        JSON.parse(localStorage.getItem("chattron-settings") || "{}");
+
+      const { apiUrl, modelName, apiKey, provider } = settings;
+      if (!apiUrl || !modelName || !provider) {
+        // 챗 메시지 제거
+        if (chatMessage && chatMessage.parentNode) {
+          chatMessage.remove();
+        }
+        renderMessage("❌ API setting is missing.", "system");
+        return;
+      }
+
+      let payload = {};
+      let reply = "";
+
+      try {
+        switch (provider) {
+          case "openai":
+          case "ollama":
+          case "localfastapi":
+          case "custom":
+            payload = {
+              model: modelName,
+              messages: [
+                { role: "system", content: "You are a helpful assistant." },
+                { role: "user", content: prompt },
+              ],
+              stream: false,
+            };
+            break;
+          case "anthropic":
+            payload = {
+              model: modelName,
+              messages: [{ role: "user", content: prompt }],
+              stream: false,
+              max_tokens: 1024,
+            };
+            break;
+          default:
+            if (chatMessage && chatMessage.parentNode) {
+              chatMessage.remove();
+            }
+            renderMessage("❌ Unsupported provider.", "system");
+            return;
+        }
+
+        const headers = {
+          "Content-Type": "application/json",
+          ...(apiKey && { Authorization: `Bearer ${apiKey}` }),
+        };
+
+        console.log("📤 Sending direct LLM request...");
+        const startTime = Date.now();
+
+        const res = await fetch(apiUrl, {
+          method: "POST",
+          headers,
+          body: JSON.stringify(payload),
+        });
+
+        const responseTime = Date.now() - startTime;
+        console.log(`📥 LLM response received in ${responseTime}ms`);
+
+        if (!res.ok) {
+          const errorText = await res.text();
+          throw new Error(`HTTP ${res.status}: ${errorText}`);
+        }
+
+        const data = await res.json();
+        console.log("📋 LLM response data:", data);
+
+        switch (provider) {
+          case "openai":
+            reply = data.choices?.[0]?.message?.content || "No response";
+            break;
+          case "ollama":
+            reply = data.message?.content || data.response || "No response";
+            break;
+          case "anthropic":
+            reply = data.content || "No response";
+            break;
+          case "localfastapi":
+          case "custom":
+            reply =
+              data.choices?.[0]?.message?.content ||
+              data.message?.content ||
+              data.content ||
+              data.response ||
+              data.text ||
+              (typeof data === "string" ? data : JSON.stringify(data));
+            break;
+        }
+
+        // 챗 메시지 제거
+        if (chatMessage && chatMessage.parentNode) {
+          chatMessage.remove();
+        }
+
+        renderMessage(reply, "assistant");
+        saveToHistory(prompt, reply);
+      } catch (err) {
+        console.error("💥 Direct LLM chat error:", err);
+
+        // 챗 메시지 제거
+        if (chatMessage && chatMessage.parentNode) {
+          chatMessage.remove();
+        }
+
+        renderMessage(
+          "❌ Error occurred during API request: " + err.message,
+          "system"
+        );
+      }
+    } catch (err) {
+      console.error("💥 General error in send handler:", err);
+
+      // 모든 로딩 메시지 제거
+      removeLoadingMessage();
+      const systemMessages = document.querySelectorAll(".bg-yellow-100");
+      systemMessages.forEach((msg) => {
+        if (
+          msg.textContent.includes("🤔") ||
+          msg.textContent.includes("🧠") ||
+          msg.textContent.includes("🛠️") ||
+          msg.textContent.includes("💬")
+        ) {
+          msg.remove();
+        }
       });
 
-      const data = await res.json();
-
-      switch (provider) {
-        case "openai":
-          reply = data.choices?.[0]?.message?.content || "No response";
-          break;
-        case "ollama":
-          reply = data.message?.content || data.response || "No response";
-          break;
-        case "anthropic":
-          reply = data.content || "No response";
-          break;
-        case "localfastapi":
-        case "custom":
-          reply =
-            data.choices?.[0]?.message?.content ||
-            data.message?.content ||
-            data.content ||
-            data.response ||
-            data.text ||
-            (typeof data === "string" ? data : JSON.stringify(data));
-          break;
-      }
-
-      renderMessage(reply, "assistant");
-      saveToHistory(prompt, reply);
-    } catch (err) {
-      console.error("chatting error:", err);
-      renderMessage("Error occurred during API request.", "system");
+      renderMessage(
+        "❌ An unexpected error occurred: " + err.message,
+        "system"
+      );
     }
   });
 
