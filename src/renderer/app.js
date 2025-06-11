@@ -25,20 +25,47 @@ async function findToolViaLLM(prompt, tools) {
   const clientList = Array.from(clientSet);
   const toolList = Array.from(toolSet);
 
-  // ✅ 프롬프트 구성
+  // ✅ 통합된 프롬프트 - 단일/다중 자동 판단
   const llmPrompt = `
-You are a tool-matching engine. Based on the user's request, choose one of the available MCP tools and return the response STRICTLY in the following JSON format:
+You are a tool-matching engine. Analyze the user's request and determine if it needs one tool or multiple tools.
 
+RESPONSE FORMATS:
+
+1. For SINGLE tool requests, return a JSON object:
 {
-  "client": "<client key from below>",
-  "toolName": "<tool name from below>",
+  "client": "<client key>",
+  "toolName": "<tool name>",
   "args": {
     "<arg1>": "...",
     ...
   }
 }
 
-DO NOT invent tool names or client keys. You MUST choose ONLY from the following options:
+2. For MULTIPLE tool requests, return a JSON ARRAY:
+[
+  {
+    "client": "<client key>",
+    "toolName": "<tool name>",
+    "args": {
+      "<arg1>": "...",
+      ...
+    }
+  },
+  {
+    "client": "<client key>",
+    "toolName": "<tool name>",
+    "args": {
+      "<arg1>": "...",
+      ...
+    }
+  }
+]
+
+RULES:
+- If the request involves sequential actions (like "do X then Y" or "go to A then B"), return an ARRAY
+- If the request is a single action, return a single OBJECT
+- DO NOT invent tool names or client keys
+- You MUST choose ONLY from the available options below
 
 Valid client keys:
 ${JSON.stringify(clientList, null, 2)}
@@ -56,7 +83,7 @@ User request:
       {
         role: "system",
         content:
-          "You are a strict tool-to-JSON converter. Only return valid JSON using the allowed client/tool names. Do NOT add any comments or text.",
+          "You are a tool selector. Return either a single JSON object for one tool or a JSON array for multiple tools. Do NOT add any comments or explanatory text.",
       },
       { role: "user", content: llmPrompt },
     ],
@@ -68,17 +95,34 @@ User request:
     ...(apiKey && { Authorization: `Bearer ${apiKey}` }),
   };
 
-  // ✅ JSON 추출 함수
-  function extractValidJsonFromText(text) {
-    console.log("🔍 Extracting JSON from text:", text);
+  // ✅ 통합된 JSON 추출 함수 - 객체 또는 배열 처리
+  function extractToolDataFromText(text) {
+    console.log("🔍 Extracting tool data from text:", text);
 
-    // 1. 전체 텍스트가 JSON인지 먼저 확인 (가장 일반적인 경우)
+    // 1. 전체 텍스트가 JSON인지 확인 (객체 또는 배열)
     try {
       const trimmedText = text.trim();
       const parsed = JSON.parse(trimmedText);
-      if (parsed.client && parsed.toolName && typeof parsed.args === "object") {
-        console.log("✅ Direct JSON parse successful:", parsed);
-        return parsed;
+
+      // 배열인 경우
+      if (Array.isArray(parsed)) {
+        const validArray = parsed.filter(
+          (item) =>
+            item.client && item.toolName && typeof item.args === "object"
+        );
+        if (validArray.length > 0) {
+          console.log("✅ Direct array parse successful:", validArray);
+          return { type: "multiple", tools: validArray };
+        }
+      }
+      // 객체인 경우
+      else if (
+        parsed.client &&
+        parsed.toolName &&
+        typeof parsed.args === "object"
+      ) {
+        console.log("✅ Direct object parse successful:", parsed);
+        return { type: "single", tool: parsed };
       }
     } catch (e) {
       console.log("⚠️ Direct JSON parse failed, trying alternatives...");
@@ -89,13 +133,23 @@ User request:
     if (markdownMatch) {
       try {
         const parsed = JSON.parse(markdownMatch[1]);
-        if (
+
+        if (Array.isArray(parsed)) {
+          const validArray = parsed.filter(
+            (item) =>
+              item.client && item.toolName && typeof item.args === "object"
+          );
+          if (validArray.length > 0) {
+            console.log("✅ Markdown array parse successful:", validArray);
+            return { type: "multiple", tools: validArray };
+          }
+        } else if (
           parsed.client &&
           parsed.toolName &&
           typeof parsed.args === "object"
         ) {
-          console.log("✅ Markdown JSON parse successful:", parsed);
-          return parsed;
+          console.log("✅ Markdown object parse successful:", parsed);
+          return { type: "single", tool: parsed };
         }
       } catch (e) {
         console.warn(
@@ -105,77 +159,63 @@ User request:
       }
     }
 
-    // 3. 중괄호 블록 fallback (여러 JSON 객체가 있을 수 있음)
+    // 3. 배열 패턴 먼저 찾기 (대괄호로 시작)
+    const arrayMatch = text.match(/\[[\s\S]*\]/);
+    if (arrayMatch) {
+      try {
+        const parsed = JSON.parse(arrayMatch[0]);
+        if (Array.isArray(parsed)) {
+          const validArray = parsed.filter(
+            (item) =>
+              item.client && item.toolName && typeof item.args === "object"
+          );
+          if (validArray.length > 0) {
+            console.log("✅ Array pattern parse successful:", validArray);
+            return { type: "multiple", tools: validArray };
+          }
+        }
+      } catch (e) {
+        console.log("⚠️ Array pattern parse failed:", e.message);
+      }
+    }
+
+    // 4. 객체 패턴 찾기 (중괄호 블록들)
     const jsonBlocks = [...text.matchAll(/\{[\s\S]*?\}/g)];
     console.log(`🔍 Found ${jsonBlocks.length} potential JSON blocks`);
 
+    // 여러 객체가 있으면 배열로 처리
+    const validObjects = [];
     for (const match of jsonBlocks) {
       try {
         const jsonText = match[0];
-        console.log("🧪 Testing JSON block:", jsonText);
         const json = JSON.parse(jsonText);
 
         if (json.client && json.toolName && typeof json.args === "object") {
-          console.log("✅ JSON block parse successful:", json);
-          return json;
+          validObjects.push(json);
         }
       } catch (e) {
-        console.log("⚠️ JSON block parse failed:", e.message);
         continue;
       }
     }
 
-    // 4. 더 관대한 JSON 추출 시도 (줄바꿈과 공백 처리)
-    const lines = text.split("\n");
-    let jsonStart = -1;
-    let jsonEnd = -1;
-    let braceCount = 0;
-
-    for (let i = 0; i < lines.length; i++) {
-      const line = lines[i].trim();
-      if (line.startsWith("{") && jsonStart === -1) {
-        jsonStart = i;
-        braceCount = 1;
-      } else if (jsonStart !== -1) {
-        braceCount += (line.match(/\{/g) || []).length;
-        braceCount -= (line.match(/\}/g) || []).length;
-
-        if (braceCount === 0) {
-          jsonEnd = i;
-          break;
-        }
-      }
+    if (validObjects.length > 1) {
+      console.log(
+        "✅ Multiple objects found, treating as array:",
+        validObjects
+      );
+      return { type: "multiple", tools: validObjects };
+    } else if (validObjects.length === 1) {
+      console.log("✅ Single object found:", validObjects[0]);
+      return { type: "single", tool: validObjects[0] };
     }
 
-    if (jsonStart !== -1 && jsonEnd !== -1) {
-      try {
-        const jsonText = lines.slice(jsonStart, jsonEnd + 1).join("\n");
-        console.log("🧪 Testing multi-line JSON:", jsonText);
-        const parsed = JSON.parse(jsonText);
-
-        if (
-          parsed.client &&
-          parsed.toolName &&
-          typeof parsed.args === "object"
-        ) {
-          console.log("✅ Multi-line JSON parse successful:", parsed);
-          return parsed;
-        }
-      } catch (e) {
-        console.warn("⚠️ Multi-line JSON parse failed:", e.message);
-      }
-    }
-
-    console.log("❌ No valid JSON found in text");
+    console.log("❌ No valid tool data found in text");
     return null;
   }
 
   try {
     console.log("🛰️ Sending request to LLM:", { apiUrl, modelName, provider });
-    console.log("📤 Request payload:", JSON.stringify(payload, null, 2));
-    console.log("📤 Request headers:", headers);
 
-    // 요청 시작 시간 기록
     const startTime = Date.now();
 
     const res = await fetch(apiUrl, {
@@ -186,13 +226,7 @@ User request:
 
     const responseTime = Date.now() - startTime;
     console.log(`⏱️ Response received in ${responseTime}ms`);
-    console.log("📊 Response status:", res.status, res.statusText);
-    console.log(
-      "📋 Response headers:",
-      Object.fromEntries(res.headers.entries())
-    );
 
-    // 응답이 성공적이지 않은 경우
     if (!res.ok) {
       const errorText = await res.text();
       console.error("❌ HTTP Error Response:", {
@@ -204,7 +238,6 @@ User request:
     }
 
     const data = await res.json();
-
     console.log("🧾 Full LLM response JSON object:", data);
 
     const text =
@@ -214,46 +247,176 @@ User request:
       data.response ||
       "";
 
-    console.log(
-      "📩 Raw LLM response (stringified):\n",
-      JSON.stringify(text, null, 2)
-    );
-    console.log("📩 Raw LLM response (plain text):\n", text);
+    console.log("📩 Raw LLM response text:\n", text);
 
-    const parsed = extractValidJsonFromText(text);
-    if (parsed) {
-      // ✅ client/toolName validation against actual registry
-      const validClient = clientList.includes(parsed.client);
-      const validTool = toolList.includes(parsed.toolName);
-      if (validClient && validTool) {
-        console.log("✅ Parsed and validated JSON:", parsed);
-        return parsed;
-      } else {
-        console.warn(
-          "❌ Parsed JSON contains invalid client or toolName.",
-          parsed
+    const result = extractToolDataFromText(text);
+
+    if (result) {
+      // 🔍 유효성 검증 및 기존 구조에 맞게 반환
+      if (result.type === "single") {
+        const tool = result.tool;
+        const validClient = clientList.includes(tool.client);
+        const validTool = toolList.includes(tool.toolName);
+
+        if (validClient && validTool) {
+          console.log("✅ Single tool validated:", tool);
+          // 기존 구조에 맞게 반환 (client, toolName, args)
+          return {
+            client: tool.client,
+            toolName: tool.toolName,
+            args: tool.args,
+          };
+        } else {
+          console.warn("❌ Single tool validation failed:", {
+            validClient,
+            validTool,
+            tool,
+          });
+        }
+      } else if (result.type === "multiple") {
+        const validTools = result.tools.filter(
+          (tool) =>
+            clientList.includes(tool.client) && toolList.includes(tool.toolName)
         );
+
+        if (validTools.length > 0) {
+          console.log(
+            `✅ ${validTools.length}/${result.tools.length} tools validated:`,
+            validTools
+          );
+
+          if (validTools.length < result.tools.length) {
+            console.warn(
+              `⚠️ ${
+                result.tools.length - validTools.length
+              } tools were filtered out due to validation failure`
+            );
+          }
+
+          // 다중 도구 표시를 위해 특별한 구조로 반환
+          return {
+            isMultiple: true,
+            tools: validTools,
+            totalCount: validTools.length,
+          };
+        } else {
+          console.warn("❌ No tools passed validation:", result.tools);
+        }
       }
-    } else {
-      console.warn("❌ No valid JSON matching MCP format found.");
     }
 
+    console.warn("❌ No valid tool configuration found");
     return null;
   } catch (err) {
     console.error("🚨 LLM tool matching error:", err);
-
-    // 네트워크 오류인지 확인
-    if (err instanceof TypeError && err.message.includes("fetch")) {
-      console.error("🌐 Network error - check if the API URL is accessible");
-    }
-
-    // 타임아웃 오류인지 확인
-    if (err.name === "AbortError") {
-      console.error("⏰ Request timed out");
-    }
-
     return null;
   }
+}
+
+// 다중 MCP 도구 실행 함수
+async function executeMultipleTools(toolsConfig, prompt) {
+  const { tools, totalCount } = toolsConfig;
+
+  console.log(`🔄 Executing ${totalCount} tools sequentially...`);
+
+  const results = [];
+
+  for (let i = 0; i < tools.length; i++) {
+    const tool = tools[i];
+
+    console.log(`📍 Executing tool ${i + 1}/${totalCount}:`, {
+      client: tool.client,
+      toolName: tool.toolName,
+      args: tool.args,
+    });
+
+    // 각 도구별 실행 메시지 표시
+    const executingMessage = renderMessage(
+      `🛠️ Executing tool ${i + 1}/${totalCount}: ${tool.client}/${
+        tool.toolName
+      }...`,
+      "system"
+    );
+
+    try {
+      console.log("MCP CALL DEBUG", {
+        client: tool.client,
+        name: tool.toolName,
+        args: tool.args,
+      });
+
+      const result = await window.mcpAPI.callTool({
+        client: tool.client,
+        name: tool.toolName,
+        args: tool.args,
+      });
+
+      // 실행 메시지 제거
+      if (executingMessage && executingMessage.parentNode) {
+        executingMessage.remove();
+      }
+
+      // 결과 표시
+      const resultMessage = `[${i + 1}/${totalCount}] ${tool.client}/${
+        tool.toolName
+      }: ${JSON.stringify(result, null, 2)}`;
+      renderMessage(resultMessage, "assistant");
+
+      results.push({
+        index: i + 1,
+        success: true,
+        client: tool.client,
+        toolName: tool.toolName,
+        result: result,
+      });
+
+      console.log(`✅ Tool ${i + 1} executed successfully`);
+
+      // 도구 실행 사이에 지연 (브라우저 작업의 경우 유용)
+      if (i < tools.length - 1) {
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+      }
+    } catch (err) {
+      console.error(`❌ Tool ${i + 1} execution failed:`, err);
+
+      // 실행 메시지 제거
+      if (executingMessage && executingMessage.parentNode) {
+        executingMessage.remove();
+      }
+
+      // 에러 메시지 표시
+      const errorMessage = `[${i + 1}/${totalCount}] ${tool.client}/${
+        tool.toolName
+      } Error: ${err.message}`;
+      renderMessage(errorMessage, "system");
+
+      results.push({
+        index: i + 1,
+        success: false,
+        client: tool.client,
+        toolName: tool.toolName,
+        error: err.message,
+      });
+
+      // 실패한 경우에도 계속 진행 (설정에 따라 중단하려면 break 사용)
+      // break;
+    }
+  }
+
+  // 전체 실행 결과 요약
+  const successCount = results.filter((r) => r.success).length;
+  const summary = `✅ Multi-tool execution completed: ${successCount}/${totalCount} tools succeeded`;
+
+  console.log("🎉 Multi-tool execution summary:", {
+    results,
+    successCount,
+    totalCount,
+  });
+
+  // 요약을 히스토리에 저장
+  saveToHistory(prompt, summary);
+
+  return results;
 }
 
 // 수정된 MCP 동기화 코드 -> 기존에 Session Storage 삭제도 제대로 안되었고, 동기화에 문제가 있어 토글을 꺼도 MCP가 활성화 되어 있는 상태로 남아 있는 경우가 있었음
@@ -593,55 +756,15 @@ document.addEventListener("DOMContentLoaded", async () => {
   const input = document.getElementById("prompt-input");
   const sendBtn = document.getElementById("send-btn");
 
-  settingsBtn?.addEventListener("click", (e) => {
-    e.stopPropagation();
-    dropdownMenu?.classList.toggle("hidden");
-  });
-
-  document.addEventListener("click", () => {
-    dropdownMenu?.classList.add("hidden");
-  });
-
-  apiSettingsLink?.addEventListener("click", () => {
-    window.location.href = "settings.html";
-  });
-
-  mcpSettingsBtn?.addEventListener("click", () => {
-    sessionStorage.removeItem("selected-mcp-key");
-    window.location.href = "mcp.html";
-  });
-
-  try {
-    window.mcpBridgeAPI?.launchBridge();
-  } catch (err) {
-    alert("MCP Agent 자동 실행 실패: " + err.message);
-    console.warn("MCP Agent 자동 실행 실패:", err.message);
-  }
-
-  console.log("🚀 Initializing ChatTron...");
-
-  try {
-    await syncMCPState();
-    loadHistory();
-    updateHistoryUI();
-    console.log("✅ ChatTron initialization complete");
-  } catch (error) {
-    console.error("❌ Initialization failed:", error);
-
-    await buildMCPRegistry();
-    updateMCPUI();
-    loadHistory();
-    updateHistoryUI();
-  }
-
-  sendBtn?.addEventListener("click", async () => {
+  // 🎯 메인 실행 로직을 별도 함수로 분리
+  async function handlePromptSubmission() {
     const prompt = input.value.trim();
     if (!prompt) return;
 
     renderMessage(prompt, "user");
     input.value = "";
 
-    // 로딩 상태 표시 (안전하게)
+    // 로딩 상태 표시
     let loadingMessage = null;
     try {
       loadingMessage = renderMessage("🤔 Thinking...", "system");
@@ -674,20 +797,39 @@ document.addEventListener("DOMContentLoaded", async () => {
 
         const llmMatch = await findToolViaLLM(prompt, mcpToolRegistry);
 
-        if (llmMatch?.client && llmMatch?.toolName) {
+        if (llmMatch) {
           console.log("✅ LLM found tool match:", llmMatch);
-          const toolList = mcpToolRegistry[llmMatch.client] || [];
-          const tool = toolList.find((t) => t.name === llmMatch.toolName);
-          if (tool) {
-            match = {
-              client: llmMatch.client,
-              tool,
-              args:
-                llmMatch.args ||
-                extractArgsFromPrompt(prompt, tool.inputSchema),
-            };
+
+          // 🎯 다중 도구 처리
+          if (llmMatch.isMultiple) {
+            console.log(
+              `🔄 Multiple tools detected (${llmMatch.totalCount} tools)`
+            );
+
+            // 로딩 메시지 제거
+            removeLoadingMessage();
+
+            // 다중 도구 실행
+            await executeMultipleTools(llmMatch, prompt);
+            return;
           }
-        } else {
+          // 🎯 단일 도구 처리 (기존 방식)
+          else if (llmMatch.client && llmMatch.toolName) {
+            const toolList = mcpToolRegistry[llmMatch.client] || [];
+            const tool = toolList.find((t) => t.name === llmMatch.toolName);
+            if (tool) {
+              match = {
+                client: llmMatch.client,
+                tool,
+                args:
+                  llmMatch.args ||
+                  extractArgsFromPrompt(prompt, tool.inputSchema),
+              };
+            }
+          }
+        }
+
+        if (!match && !llmMatch?.isMultiple) {
           console.log("❌ LLM could not find a suitable tool match");
         }
       }
@@ -695,9 +837,9 @@ document.addEventListener("DOMContentLoaded", async () => {
       // 로딩 메시지 제거
       removeLoadingMessage();
 
-      // ✅ MCP 실행
+      // ✅ 단일 MCP 실행 (기존 방식)
       if (match) {
-        console.log("🛠️ Executing MCP tool...");
+        console.log("🛠️ Executing single MCP tool...");
         const executingMessage = renderMessage(
           "🛠️ Executing tool...",
           "system"
@@ -742,7 +884,7 @@ document.addEventListener("DOMContentLoaded", async () => {
         return;
       }
 
-      // ❗ fallback: LLM chat
+      // ❗ fallback: LLM chat (기존 코드와 동일)
       console.log("💬 Falling back to direct LLM chat...");
       const chatMessage = renderMessage(
         "💬 Using direct LLM chat...",
@@ -886,8 +1028,65 @@ document.addEventListener("DOMContentLoaded", async () => {
         "system"
       );
     }
+  }
+
+  // 기존 이벤트 핸들러들...
+  settingsBtn?.addEventListener("click", (e) => {
+    e.stopPropagation();
+    dropdownMenu?.classList.toggle("hidden");
   });
 
+  document.addEventListener("click", () => {
+    dropdownMenu?.classList.add("hidden");
+  });
+
+  apiSettingsLink?.addEventListener("click", () => {
+    window.location.href = "settings.html";
+  });
+
+  mcpSettingsBtn?.addEventListener("click", () => {
+    sessionStorage.removeItem("selected-mcp-key");
+    window.location.href = "mcp.html";
+  });
+
+  try {
+    window.mcpBridgeAPI?.launchBridge();
+  } catch (err) {
+    alert("MCP Agent 자동 실행 실패: " + err.message);
+    console.warn("MCP Agent 자동 실행 실패:", err.message);
+  }
+
+  console.log("🚀 Initializing ChatTron...");
+
+  try {
+    await syncMCPState();
+    loadHistory();
+    updateHistoryUI();
+    console.log("✅ ChatTron initialization complete");
+  } catch (error) {
+    console.error("❌ Initialization failed:", error);
+    await buildMCPRegistry();
+    updateMCPUI();
+    loadHistory();
+    updateHistoryUI();
+  }
+
+  // 🎯 Send 버튼 클릭 이벤트
+  sendBtn?.addEventListener("click", handlePromptSubmission);
+
+  // 🎯 Enter 키 이벤트 핸들러 추가
+  input?.addEventListener("keydown", (event) => {
+    // Enter 키가 눌렸을 때 (Shift+Enter는 제외)
+    if (event.key === "Enter" && !event.shiftKey) {
+      event.preventDefault(); // 기본 Enter 동작 방지 (줄바꿈 방지)
+      handlePromptSubmission();
+    }
+
+    // Shift+Enter는 줄바꿈을 허용 (input이 textarea인 경우)
+    // 별도 처리 불필요 - 기본 동작이 줄바꿈
+  });
+
+  // 현재 설정 표시 (기존 코드)
   const settings =
     window.settingsAPI?.load?.() ||
     JSON.parse(localStorage.getItem("chattron-settings") || "{}");
