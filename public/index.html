@@ -153,13 +153,14 @@
         <!-- Input Box -->
         <div class="px-4 pt-5 pb-3 border-t bg-white">
           <div class="flex items-center gap-3">
-            <label class="flex flex-col flex-1 min-w-40 h-12">
-              <div class="flex w-full h-full rounded-lg">
-                <input
+            <label class="flex flex-col flex-1 min-w-40">
+              <div class="flex w-full rounded-lg">
+                <textarea
                   id="prompt-input"
                   placeholder="Type your prompt here..."
-                  class="form-input w-full resize-none rounded-l-lg text-[#0d141c] bg-[#e7edf4] px-4 border-none focus:outline-none placeholder:text-[#49739c]"
-                />
+                  rows="1"
+                  class="form-textarea w-full resize-none rounded-l-lg text-[#0d141c] bg-[#e7edf4] px-4 py-3 border-none focus:outline-none placeholder:text-[#49739c] min-h-[48px] max-h-[200px] overflow-y-hidden leading-5"
+                ></textarea>
                 <div class="flex items-center bg-[#e7edf4] pr-4 rounded-r-lg">
                   <div class="flex items-center gap-4">
                     <button class="min-w-[24px] min-h-[24px]">

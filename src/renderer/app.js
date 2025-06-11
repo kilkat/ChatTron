@@ -586,6 +586,7 @@ async function syncMCPState() {
     console.error("❌ Failed to sync MCP state:", error);
   }
 }
+
 function findMatchingTool(prompt) {
   const lower = prompt.toLowerCase();
 
@@ -747,6 +748,47 @@ function updateHistoryUI() {
   clearContainer.appendChild(clearBtn);
 }
 
+// Textarea 자동 크기 조절 함수들
+function initializeTextareaAutoResize() {
+  const textarea = document.getElementById("prompt-input");
+  if (!textarea) return;
+
+  function autoResize() {
+    // Reset height to auto to get proper scrollHeight
+    textarea.style.height = "auto";
+
+    // Calculate new height (minimum 48px, maximum 200px)
+    const newHeight = Math.max(48, Math.min(textarea.scrollHeight, 200));
+    textarea.style.height = newHeight + "px";
+
+    // Show/hide scrollbar when content exceeds max height
+    if (textarea.scrollHeight > 200) {
+      textarea.style.overflowY = "auto";
+    } else {
+      textarea.style.overflowY = "hidden";
+    }
+  }
+
+  // Auto-resize on input
+  textarea.addEventListener("input", autoResize);
+
+  // Auto-resize on paste
+  textarea.addEventListener("paste", function () {
+    setTimeout(autoResize, 0);
+  });
+
+  // Reset textarea height after sending (전역 함수로 노출)
+  window.resetTextareaHeight = function () {
+    textarea.value = "";
+    autoResize();
+  };
+
+  // Initial resize on page load
+  autoResize();
+
+  return autoResize;
+}
+
 document.addEventListener("DOMContentLoaded", async () => {
   const settingsBtn = document.getElementById("settings-btn");
   const dropdownMenu = document.getElementById("dropdown-menu");
@@ -755,6 +797,9 @@ document.addEventListener("DOMContentLoaded", async () => {
   const newChatBtn = document.getElementById("new-chat");
   const input = document.getElementById("prompt-input");
   const sendBtn = document.getElementById("send-btn");
+
+  // 🎯 Textarea 자동 크기 조절 초기화
+  initializeTextareaAutoResize();
 
   // 🎯 메인 실행 로직을 별도 함수로 분리
   async function handlePromptSubmission() {
