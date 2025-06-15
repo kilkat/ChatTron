@@ -639,7 +639,13 @@ function renderMessage(text, sender) {
 }
 
 function getCurrentSessionId() {
-  return sessionStorage.getItem("current-session-id") || "default";
+  let sessionId = sessionStorage.getItem("current-session-id");
+  if (!sessionId) {
+    sessionId = crypto.randomUUID();
+    sessionStorage.setItem("current-session-id", sessionId);
+    console.log("New session ID created:", sessionId);
+  }
+  return sessionId;
 }
 
 function saveToHistory(prompt, reply) {
@@ -679,6 +685,8 @@ function updateHistoryUI() {
   );
 
   Object.entries(allHistory).forEach(([sessionId, messages]) => {
+    if (!Array.isArray(messages) || messages.length === 0) return;
+
     const firstPrompt = messages[0]?.prompt || "(empty)";
     const item = document.createElement("div");
     item.className =
@@ -1075,7 +1083,34 @@ document.addEventListener("DOMContentLoaded", async () => {
     }
   }
 
-  // 기존 이벤트 핸들러들...
+  // 기존 이벤트 핸들러들
+
+  newChatBtn?.addEventListener("click", () => {
+    // 1. 기존 세션 ID 제거 (세션을 비워 새로 시작)
+    sessionStorage.removeItem("current-session-id");
+
+    // 2. chat-panel Welcome 메시지 복원
+    const chatPanel = document.getElementById("chat-panel");
+    if (chatPanel) {
+      chatPanel.innerHTML = `
+      <h2 class="text-[28px] font-bold text-center pt-5 pb-3 text-[#0d141c]">Welcome to ChatTron</h2>
+      <p class="text-base font-normal text-center pb-3 pt-1 text-[#0d141c]">
+        Start a new chat or continue from your history.
+      </p>
+    `;
+    }
+
+    // 3. 입력창 초기화
+    input.value = "";
+
+    // 4. 히스토리 UI 갱신
+    updateHistoryUI();
+
+    console.log(
+      "New Chat UI reset. Session ID will be created on first message."
+    );
+  });
+
   settingsBtn?.addEventListener("click", (e) => {
     e.stopPropagation();
     dropdownMenu?.classList.toggle("hidden");
