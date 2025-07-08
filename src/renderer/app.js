@@ -11,7 +11,7 @@ async function findToolViaLLM(prompt, tools) {
     return null;
   }
 
-  // ✅ MCP tool 목록에서 client/toolName 자동 추출
+  // MCP tool 목록에서 client/toolName 자동 추출
   const clientSet = new Set();
   const toolSet = new Set();
 
@@ -25,7 +25,7 @@ async function findToolViaLLM(prompt, tools) {
   const clientList = Array.from(clientSet);
   const toolList = Array.from(toolSet);
 
-  // ✅ 통합된 프롬프트 - 단일/다중 자동 판단
+  // 통합된 프롬프트 - 단일/다중 자동 판단
   const llmPrompt = `
 You are a tool-matching engine. Analyze the user's request and determine if it needs one tool or multiple tools.
 
@@ -95,7 +95,7 @@ User request:
     ...(apiKey && { Authorization: `Bearer ${apiKey}` }),
   };
 
-  // ✅ 통합된 JSON 추출 함수 - 객체 또는 배열 처리
+  // 통합된 JSON 추출 함수 - 객체 또는 배열 처리
   function extractToolDataFromText(text) {
     console.log("🔍 Extracting tool data from text:", text);
 
@@ -252,7 +252,7 @@ User request:
     const result = extractToolDataFromText(text);
 
     if (result) {
-      // 🔍 유효성 검증 및 기존 구조에 맞게 반환
+      // 유효성 검증 및 기존 구조에 맞게 반환
       if (result.type === "single") {
         const tool = result.tool;
         const validClient = clientList.includes(tool.client);
@@ -797,6 +797,42 @@ function initializeTextareaAutoResize() {
   return autoResize;
 }
 
+// MCP 도구 목록을 가져와서 표시하는 함수
+async function handleListMcpTools() {
+  try {
+    const activeClients = await window.mcpAPI.getClients();
+    if (activeClients.length === 0) {
+      renderMessage("No active MCP clients found.", "system");
+      return;
+    }
+
+    let message = "Available MCP Tools:\n\n";
+
+    for (const clientKey of activeClients) {
+      try {
+        const { tools } = await window.mcpAPI.listTools(clientKey);
+        message += `[Client: ${clientKey}]\n`;
+        if (tools && tools.length > 0) {
+          tools.forEach(tool => {
+            message += `- ${tool.name}: ${tool.description}\n`;
+          });
+        } else {
+          message += "- No tools available\n";
+        }
+        message += "\n";
+      } catch (err) {
+        message += `[Client: ${clientKey}]\n- Error fetching tools: ${err.message}\n\n`;
+      }
+    }
+
+    renderMessage(message, "assistant");
+
+  } catch (err) {
+    console.error("Failed to list MCP tools:", err);
+    renderMessage("Error: " + err.message, "system");
+  }
+}
+
 document.addEventListener("DOMContentLoaded", async () => {
   const settingsBtn = document.getElementById("settings-btn");
   const dropdownMenu = document.getElementById("dropdown-menu");
@@ -805,11 +841,12 @@ document.addEventListener("DOMContentLoaded", async () => {
   const newChatBtn = document.getElementById("new-chat");
   const input = document.getElementById("prompt-input");
   const sendBtn = document.getElementById("send-btn");
+  const listMcpToolsBtn = document.getElementById("mcp-tool-list-btn");
 
-  // 🎯 Textarea 자동 크기 조절 초기화
+  // Textarea 자동 크기 조절 초기화
   initializeTextareaAutoResize();
 
-  // 🎯 메인 실행 로직을 별도 함수로 분리
+  // 메인 실행 로직을 별도 함수로 분리
   async function handlePromptSubmission() {
     const prompt = input.value.trim();
     if (!prompt) return;
@@ -842,7 +879,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     try {
       let match = findMatchingTool(prompt);
 
-      // 🧠 자연어 기반 MCP 툴 매칭 (fallback)
+      // 자연어 기반 MCP 툴 매칭 (fallback)
       if (!match) {
         console.log("🔍 No direct tool match found, trying LLM matching...");
 
@@ -853,7 +890,7 @@ document.addEventListener("DOMContentLoaded", async () => {
         if (llmMatch) {
           console.log("✅ LLM found tool match:", llmMatch);
 
-          // 🎯 다중 도구 처리
+          // 다중 도구 처리
           if (llmMatch.isMultiple) {
             console.log(
               `🔄 Multiple tools detected (${llmMatch.totalCount} tools)`
@@ -866,7 +903,7 @@ document.addEventListener("DOMContentLoaded", async () => {
             await executeMultipleTools(llmMatch, prompt);
             return;
           }
-          // 🎯 단일 도구 처리 (기존 방식)
+          // 단일 도구 처리 (기존 방식)
           else if (llmMatch.client && llmMatch.toolName) {
             const toolList = mcpToolRegistry[llmMatch.client] || [];
             const tool = toolList.find((t) => t.name === llmMatch.toolName);
@@ -890,7 +927,7 @@ document.addEventListener("DOMContentLoaded", async () => {
       // 로딩 메시지 제거
       removeLoadingMessage();
 
-      // ✅ 단일 MCP 실행 (기존 방식)
+      // 단일 MCP 실행 (기존 방식)
       if (match) {
         console.log("🛠️ Executing single MCP tool...");
         const executingMessage = renderMessage(
@@ -937,7 +974,7 @@ document.addEventListener("DOMContentLoaded", async () => {
         return;
       }
 
-      // ❗ fallback: LLM chat (기존 코드와 동일)
+      // fallback: LLM chat (기존 코드와 동일)
       console.log("💬 Falling back to direct LLM chat...");
       const chatMessage = renderMessage(
         "💬 Using direct LLM chat...",
@@ -1151,10 +1188,14 @@ document.addEventListener("DOMContentLoaded", async () => {
     updateHistoryUI();
   }
 
-  // 🎯 Send 버튼 클릭 이벤트
+  // Send 버튼 클릭 이벤트
   sendBtn?.addEventListener("click", handlePromptSubmission);
+  
+  // MCP 도구 목록 버튼 클릭 이벤트
+  listMcpToolsBtn?.addEventListener("click", handleListMcpTools);
 
-  // 🎯 Enter 키 이벤트 핸들러 추가
+
+  // Enter 키 이벤트 핸들러 추가
   input?.addEventListener("keydown", (event) => {
     // Enter 키가 눌렸을 때 (Shift+Enter는 제외)
     if (event.key === "Enter" && !event.shiftKey) {
