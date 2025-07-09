@@ -1,4 +1,6 @@
 let mcpToolRegistry = {};
+let llmToolMatchingPrompt = ""; // LLM 도구 매칭 프롬프트 내용을 저장할 변수
+let systemPrompt = ""; // 시스템 프롬프트 내용을 저장할 변수
 
 // --- 파일 업로드 관련 변수 및 함수 시작 ---
 let uploadedFiles = []; // 업로드된 파일들을 저장할 배열
@@ -124,56 +126,11 @@ async function findToolViaLLM(prompt, tools) {
   const toolList = Array.from(toolSet);
 
   // 통합된 프롬프트 - 단일/다중 자동 판단
-  const llmPrompt = `
-You are a tool-matching engine. Analyze the user's request and determine if it needs one tool or multiple tools.
-
-RESPONSE FORMATS:
-
-1. For SINGLE tool requests, return a JSON object:
-{
-  "client": "<client key>",
-  "toolName": "<tool name>",
-  "args": {
-    "<arg1>": "...",
-    ...
-  }
-}
-
-2. For MULTIPLE tool requests, return a JSON ARRAY:
-[
-  {
-    "client": "<client key>",
-    "toolName": "<tool name>",
-    "args": {
-      "<arg1>": "...",
-      ...
-    }
-  },
-  {
-    "client": "<client key>",
-    "toolName": "<tool name>",
-    "args": {
-      "<arg1>": "...",
-      ...
-    }
-  }
-]
-
-RULES:
-- If the request involves sequential actions (like "do X then Y" or "go to A then B"), return an ARRAY
-- If the request is a single action, return a single OBJECT
-- DO NOT invent tool names or client keys
-- You MUST choose ONLY from the available options below
-
-Valid client keys:
-${JSON.stringify(clientList, null, 2)}
-
-Valid tool names:
-${JSON.stringify(toolList, null, 2)}
-
-User request:
-"${prompt}"
-`;
+  // 하드코딩된 문자열 대신 로드된 llmToolMatchingPrompt 사용
+  const formattedLlmPrompt = llmToolMatchingPrompt
+    .replace("{{CLIENT_LIST}}", JSON.stringify(clientList, null, 2))
+    .replace("{{TOOL_LIST}}", JSON.stringify(toolList, null, 2))
+    .replace("{{USER_PROMPT}}", prompt);
 
   const payload = {
     model: modelName,
@@ -183,7 +140,7 @@ User request:
         content:
           "You are a tool selector. Return either a single JSON object for one tool or a JSON array for multiple tools. Do NOT add any comments or explanatory text.",
       },
-      { role: "user", content: llmPrompt },
+      { role: "user", content: formattedLlmPrompt },
     ],
     stream: false,
   };
@@ -955,6 +912,125 @@ document.addEventListener("DOMContentLoaded", async () => {
   // Textarea 자동 크기 조절 초기화
   initializeTextareaAutoResize();
 
+  // 프롬프트 파일 로드
+  try {
+    llmToolMatchingPrompt = await window.promptAPI.loadPrompt("../src/prompts/mcp_tool_matching_prompt.txt");
+    if (!llmToolMatchingPrompt) {
+      console.warn("LLM tool matching prompt file not loaded. Using hardcoded fallback.");
+      llmToolMatchingPrompt = `
+You are a tool-matching engine. Analyze the user's request and determine if it needs one tool or multiple tools.
+
+RESPONSE FORMATS:
+
+1. For SINGLE tool requests, return a JSON object:
+{
+  "client": "<client key>",
+  "toolName": "<tool name>",
+  "args": {
+    "<arg1>": "...",
+    ...
+  }
+}
+
+2. For MULTIPLE tool requests, return a JSON ARRAY:
+[
+  {
+    "client": "<client key>",
+    "toolName": "<tool name>",
+    "args": {
+      "<arg1>": "...",
+      ...
+    }
+  },
+  {
+    "client": "<client key>",
+    "toolName": "<tool name>",
+    "args": {
+      "<arg1>": "...",
+      ...
+    }
+  }
+]
+
+RULES:
+- If the request involves sequential actions (like "do X then Y" or "go to A then B"), return an ARRAY
+- If the request is a single action, return a single OBJECT
+- DO NOT invent tool names or client keys
+- You MUST choose ONLY from the available options below
+
+Valid client keys:
+{{CLIENT_LIST}}
+
+Valid tool names:
+{{TOOL_LIST}}
+
+User request:
+"{{USER_PROMPT}}"
+`;
+    }
+
+    systemPrompt = await window.promptAPI.loadPrompt("../src/prompts/custom/custom-prompt.txt");
+    if (!systemPrompt) {
+      console.warn("System prompt file not loaded. Using hardcoded fallback.");
+      systemPrompt = "You are a helpful assistant.";
+    }
+  } catch (err) {
+    console.error("Error loading prompt files:", err);
+    // 오류 발생 시 기본값 사용
+    llmToolMatchingPrompt = `
+You are a tool-matching engine. Analyze the user's request and determine if it needs one tool or multiple tools.
+
+RESPONSE FORMATS:
+
+1. For SINGLE tool requests, return a JSON object:
+{
+  "client": "<client key>",
+  "toolName": "<tool name>",
+  "args": {
+    "<arg1>": "...",
+    ...
+  }
+}
+
+2. For MULTIPLE tool requests, return a JSON ARRAY:
+[
+  {
+    "client": "<client key>",
+    "toolName": "<tool name>",
+    "args": {
+      "<arg1>": "...",
+      ...
+    }
+  },
+  {
+    "client": "<client key>",
+    "toolName": "<tool name>",
+    "args": {
+      "<arg1>": "...",
+      ...
+    }
+  }
+]
+
+RULES:
+- If the request involves sequential actions (like "do X then Y" or "go to A then B"), return an ARRAY
+- If the request is a single action, return a single OBJECT
+- DO NOT invent tool names or client keys
+- You MUST choose ONLY from the available options below
+
+Valid client keys:
+{{CLIENT_LIST}}
+
+Valid tool names:
+{{TOOL_LIST}}
+
+User request:
+"{{USER_PROMPT}}"
+`;
+    systemPrompt = "You are a helpful assistant.";
+  }
+
+
   // 메인 실행 로직을 별도 함수로 분리
   async function handlePromptSubmission() {
     let promptText = input.value.trim(); // 원본 텍스트 프롬프트
@@ -1207,7 +1283,7 @@ document.addEventListener("DOMContentLoaded", async () => {
             payload = {
               model: modelName,
               messages: [
-                { role: "system", content: "You are a helpful assistant." },
+                { role: "system", content: systemPrompt }, // 로드된 systemPrompt 사용
                 { role: "user", content: finalPrompt }, // <-- finalPrompt 사용
               ],
               stream: false,

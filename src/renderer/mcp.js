@@ -151,7 +151,7 @@ document.addEventListener("DOMContentLoaded", () => {
       sessionStorage.removeItem("selected-mcp-key");
       console.log(`🔑 Cleared selected-mcp-key`);
 
-      alert("✅ Server deleted successfully!");
+      alert("Server deleted successfully!");
 
       // 3. 메인 페이지로 리다이렉트
       console.log(`🔄 Redirecting to main page...`);
