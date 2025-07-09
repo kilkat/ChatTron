@@ -1,5 +1,103 @@
 let mcpToolRegistry = {};
 
+// --- 파일 업로드 관련 변수 및 함수 시작 ---
+let uploadedFiles = []; // 업로드된 파일들을 저장할 배열
+const fileInput = document.getElementById("file-input");
+const attachBtn = document.getElementById("attach-btn");
+const uploadedFilesList = document.getElementById("uploaded-files-list");
+const fileUploadSection = document.getElementById("file-upload-section");
+const clearAllFilesBtn = document.getElementById("clear-all-files-btn");
+const chatPanel = document.getElementById("chat-panel"); // chatPanel 요소 추가
+
+// 파일 목록 UI 업데이트 함수
+function updateUploadedFilesUI() {
+  uploadedFilesList.innerHTML = ""; // 기존 목록 초기화
+  if (uploadedFiles.length > 0) {
+    fileUploadSection.classList.remove("hidden");
+    clearAllFilesBtn.classList.remove("hidden");
+    uploadedFiles.forEach((file, index) => {
+      const fileTag = document.createElement("div");
+      fileTag.className =
+        "flex items-center bg-blue-100 text-blue-800 text-xs font-medium px-2.5 py-1 rounded-full dark:bg-blue-900 dark:text-blue-300 mr-1 mb-1";
+      fileTag.innerHTML = `
+        <span>${file.name}</span>
+        <button type="button" class="ml-2 text-blue-800 hover:text-blue-900" data-file-index="${index}">
+          ×
+        </button>
+      `;
+      uploadedFilesList.appendChild(fileTag);
+    });
+  } else {
+    fileUploadSection.classList.add("hidden");
+    clearAllFilesBtn.classList.add("hidden");
+  }
+}
+
+// 첨부 파일 목록을 초기화하는 새로운 함수
+function clearAttachedFiles() {
+  uploadedFiles = [];
+  fileInput.value = ""; // 파일 입력 필드의 값도 초기화
+  updateUploadedFilesUI();
+  console.log("Attached files cleared.");
+}
+
+// 단일 파일 삭제 핸들러
+uploadedFilesList.addEventListener("click", (event) => {
+  if (event.target.tagName === "BUTTON") {
+    const index = parseInt(event.target.dataset.fileIndex);
+    if (!isNaN(index)) {
+      uploadedFiles.splice(index, 1); // 배열에서 파일 제거
+      updateUploadedFilesUI(); // UI 업데이트
+    }
+  }
+});
+
+// "모두 삭제" 버튼 핸들러
+clearAllFilesBtn.addEventListener("click", () => {
+  clearAttachedFiles(); // 새 함수 호출
+});
+
+// "Attach" 버튼 클릭 시 숨겨진 파일 입력 필드 트리거
+attachBtn?.addEventListener("click", () => {
+  fileInput.click();
+});
+
+// 파일 입력 필드 변경 시 (파일 선택 완료)
+fileInput.addEventListener("change", (event) => {
+  const files = event.target.files;
+  if (files.length > 0) {
+    uploadedFiles = [...uploadedFiles, ...Array.from(files)];
+    updateUploadedFilesUI();
+    console.log("Attached Files:", uploadedFiles);
+  }
+});
+
+// --- 드래그 앤 드롭 핸들러 시작 ---
+chatPanel?.addEventListener("dragover", (event) => {
+  event.preventDefault(); // 기본 동작 방지
+  chatPanel.classList.add("border-blue-500", "border-2", "border-dashed"); // 시각적 피드백 추가
+});
+
+chatPanel?.addEventListener("dragleave", (event) => {
+  event.preventDefault(); // 기본 동작 방지
+  chatPanel.classList.remove("border-blue-500", "border-2", "border-dashed"); // 시각적 피드백 제거
+});
+
+chatPanel?.addEventListener("drop", (event) => {
+  event.preventDefault(); // 기본 동작 방지
+  chatPanel.classList.remove("border-blue-500", "border-2", "border-dashed"); // 시각적 피드백 제거
+
+  const files = event.dataTransfer.files; // 드롭된 파일 가져오기
+  if (files.length > 0) {
+    uploadedFiles = [...uploadedFiles, ...Array.from(files)]; // 파일 추가
+    updateUploadedFilesUI(); // UI 업데이트
+    console.log("Dropped Files:", uploadedFiles);
+  }
+});
+// --- 드래그 앤 드롭 핸들러 끝 ---
+
+// --- 파일 업로드 관련 변수 및 함수 끝 ---
+
 async function findToolViaLLM(prompt, tools) {
   const settings =
     window.settingsAPI?.load?.() ||
@@ -696,7 +794,16 @@ function updateHistoryUI() {
       sessionStorage.setItem("current-session-id", sessionId);
       const chatPanel = document.getElementById("chat-panel");
       chatPanel.innerHTML = "";
+      // Welcome 메시지 복원 (파일 업로드 섹션 아래에)
+      chatPanel.innerHTML = `
+        <h2 class="text-[28px] font-bold text-center pt-5 pb-3 text-[#0d141c]">Welcome to ChatTron</h2>
+        <p class="text-base font-normal text-center pb-3 pt-1 text-[#0d141c]">
+          Start a new chat or continue from your history.
+        </p>
+      `;
       loadHistory();
+      // 히스토리 로드 후 파일 UI는 초기화 상태로
+      clearAttachedFiles(); // 새 함수 호출
     };
 
     const textSpan = document.createElement("span");
@@ -718,6 +825,7 @@ function updateHistoryUI() {
             Start a new chat or continue from your history.
           </p>
         `;
+        clearAttachedFiles(); // 새 함수 호출
       }
     };
 
@@ -752,6 +860,7 @@ function updateHistoryUI() {
         Start a new chat or continue from your history.
       </p>
     `;
+    clearAttachedFiles(); // 새 함수 호출
   };
   clearContainer.appendChild(clearBtn);
 }
@@ -848,11 +957,102 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   // 메인 실행 로직을 별도 함수로 분리
   async function handlePromptSubmission() {
-    const prompt = input.value.trim();
-    if (!prompt) return;
+    let promptText = input.value.trim(); // 원본 텍스트 프롬프트
+    if (!promptText && uploadedFiles.length === 0) return;
 
-    renderMessage(prompt, "user");
+    renderMessage(promptText || "[Attached File]", "user");
     input.value = "";
+
+    // LLM에 전송할 최종 콘텐츠를 담을 배열 (텍스트와 이미지를 분리하여 처리)
+    const contentParts = [];
+
+    if (promptText) {
+        contentParts.push({ type: "text", text: promptText });
+    }
+
+    if (uploadedFiles.length > 0) {
+      for (const file of uploadedFiles) {
+        if (file.type.startsWith("text/") || file.type === "application/json") {
+          // 텍스트 및 JSON 파일 처리
+          try {
+            const reader = new FileReader();
+            const content = await new Promise((resolve, reject) => {
+              reader.onload = (e) => resolve(e.target.result);
+              reader.onerror = (e) => reject(e);
+              reader.readAsText(file); // 파일을 텍스트로 읽기
+            });
+            contentParts.push({
+              type: "text",
+              text: `\n\n--- Start of ${file.name} ---\n${content}\n--- End of ${file.name} ---`
+            });
+          } catch (error) {
+            console.warn(`Failed to read text file ${file.name}:`, error);
+            contentParts.push({
+              type: "text",
+              text: `\n\n--- Error reading ${file.name}: ${error.message} ---`
+            });
+          }
+        } else if (file.type.startsWith("image/")) {
+          // 이미지 파일 처리 (Base64 인코딩)
+          try {
+            const reader = new FileReader();
+            const dataUrl = await new Promise((resolve, reject) => {
+              reader.onload = (e) => resolve(e.target.result);
+              reader.onerror = (e) => reject(e);
+              reader.readAsDataURL(file); // 이미지를 Data URL (Base64)로 읽기
+            });
+            console.log(`Image ${file.name} read as Base64. Data URL: ${dataUrl.substring(0, 50)}...`);
+            
+            // 이곳에서 LLM API에 맞는 이미지 형식으로 contentParts에 추가해야 합니다.
+            // 예를 들어 OpenAI의 경우:
+            // contentParts.push({ type: "image_url", image_url: { url: dataUrl } });
+            
+            // 현재는 콘솔에 출력만 하고, LLM 프롬프트에는 포함하지 않습니다.
+            // LLM이 멀티모달을 지원하지 않거나 API 형식이 맞지 않으면 오류가 발생할 수 있습니다.
+            contentParts.push({
+                type: "text",
+                text: `\n\n--- Attached image: ${file.name} (type: ${file.type}). Base64 data read, but LLM API payload needs to be adjusted for multimodal input. ---`
+            });
+
+          } catch (error) {
+            console.warn(`Failed to read image file ${file.name}:`, error);
+            contentParts.push({
+              type: "text",
+              text: `\n\n--- Error reading image ${file.name}: ${error.message} ---`
+            });
+          }
+        } else {
+          // 기타 지원하지 않는 파일 형식
+          contentParts.push({
+            type: "text",
+            text: `\n\n--- Attached file: ${file.name} (type: ${file.type}). Content not included due to unsupported format. ---`
+          });
+        }
+      }
+    }
+
+    // LLM payload의 messages[0].content 필드를 단일 문자열 대신
+    // `contentParts` 배열로 변경해야 합니다.
+    // 이는 선택된 LLM 제공업체의 멀티모달 API 사양에 따라 달라집니다.
+    // 현재 `payload` 구조는 단일 문자열 프롬프트만 가정하므로,
+    // 아래 `payload` 변수 생성 부분을 LLM 제공업체에 맞게 변경해야 합니다.
+    // 예: OpenAI 최신 모델의 경우:
+    // payload.messages[0].content = contentParts;
+    // ...
+
+    // 임시로, 모든 contentParts를 단일 문자열로 결합하여 기존 prompt 변수를 대체합니다.
+    // 이렇게 하면 이미지 데이터가 텍스트로 직렬화되어 LLM에 전달되지만,
+    // LLM이 이를 이미지로 인식하지 못하고 단순히 문자열로 처리할 것입니다.
+    let finalPrompt = contentParts.map(part => part.text || '').join('');
+    // 만약 contentParts에 텍스트가 전혀 없고 이미지 파트만 있다면, 기본 메시지 추가
+    if (!finalPrompt && contentParts.some(part => part.type.startsWith('image/'))) {
+        finalPrompt = "[Image attached. Model needs multimodal support to process this.]";
+    }
+    if (!finalPrompt) return; // 모든 콘텐츠가 비어있으면 전송하지 않음
+
+    // 이제 'prompt' 대신 'finalPrompt'를 LLM에 전달해야 합니다.
+    // 아래 payload 생성 부분에서 prompt 대신 finalPrompt를 사용하도록 변경합니다.
+    // ...
 
     // 로딩 상태 표시
     let loadingMessage = null;
@@ -877,7 +1077,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     }
 
     try {
-      let match = findMatchingTool(prompt);
+      let match = findMatchingTool(finalPrompt); // LLM 툴 매칭에도 finalPrompt 사용
 
       // 자연어 기반 MCP 툴 매칭 (fallback)
       if (!match) {
@@ -885,7 +1085,7 @@ document.addEventListener("DOMContentLoaded", async () => {
 
         updateLoadingMessage("🧠 Analyzing request with LLM...");
 
-        const llmMatch = await findToolViaLLM(prompt, mcpToolRegistry);
+        const llmMatch = await findToolViaLLM(finalPrompt, mcpToolRegistry); // LLM 매칭에도 finalPrompt 사용
 
         if (llmMatch) {
           console.log("✅ LLM found tool match:", llmMatch);
@@ -900,7 +1100,7 @@ document.addEventListener("DOMContentLoaded", async () => {
             removeLoadingMessage();
 
             // 다중 도구 실행
-            await executeMultipleTools(llmMatch, prompt);
+            await executeMultipleTools(llmMatch, finalPrompt); // 다중 도구 실행에도 finalPrompt 사용
             return;
           }
           // 단일 도구 처리 (기존 방식)
@@ -913,7 +1113,7 @@ document.addEventListener("DOMContentLoaded", async () => {
                 tool,
                 args:
                   llmMatch.args ||
-                  extractArgsFromPrompt(prompt, tool.inputSchema),
+                  extractArgsFromPrompt(finalPrompt, tool.inputSchema), // 인자 추출에도 finalPrompt 사용
               };
             }
           }
@@ -937,7 +1137,7 @@ document.addEventListener("DOMContentLoaded", async () => {
 
         try {
           const args =
-            match.args || extractArgsFromPrompt(prompt, match.tool.inputSchema);
+            match.args || extractArgsFromPrompt(finalPrompt, match.tool.inputSchema); // 인자 추출에도 finalPrompt 사용
 
           console.log("MCP CALL DEBUG", {
             client: match.client,
@@ -960,7 +1160,7 @@ document.addEventListener("DOMContentLoaded", async () => {
             `[MCP:${match.client}] ${JSON.stringify(result, null, 2)}`,
             "assistant"
           );
-          saveToHistory(prompt, JSON.stringify(result));
+          saveToHistory(finalPrompt, JSON.stringify(result)); // 히스토리에도 finalPrompt 저장
         } catch (err) {
           console.error("MCP execution error:", err);
 
@@ -1008,7 +1208,7 @@ document.addEventListener("DOMContentLoaded", async () => {
               model: modelName,
               messages: [
                 { role: "system", content: "You are a helpful assistant." },
-                { role: "user", content: prompt },
+                { role: "user", content: finalPrompt }, // <-- finalPrompt 사용
               ],
               stream: false,
             };
@@ -1016,7 +1216,7 @@ document.addEventListener("DOMContentLoaded", async () => {
           case "anthropic":
             payload = {
               model: modelName,
-              messages: [{ role: "user", content: prompt }],
+              messages: [{ role: "user", content: finalPrompt }], // <-- finalPrompt 사용
               stream: false,
               max_tokens: 1024,
             };
@@ -1082,7 +1282,7 @@ document.addEventListener("DOMContentLoaded", async () => {
         }
 
         renderMessage(reply, "assistant");
-        saveToHistory(prompt, reply);
+        saveToHistory(finalPrompt, reply); // 히스토리에도 finalPrompt 저장
       } catch (err) {
         console.error("💥 Direct LLM chat error:", err);
 
@@ -1117,6 +1317,9 @@ document.addEventListener("DOMContentLoaded", async () => {
         "❌ An unexpected error occurred: " + err.message,
         "system"
       );
+    } finally {
+      // 성공/실패 여부와 관계없이 전송 시 파일 초기화
+      clearAttachedFiles();
     }
   }
 
@@ -1142,6 +1345,9 @@ document.addEventListener("DOMContentLoaded", async () => {
 
     // 4. 히스토리 UI 갱신
     updateHistoryUI();
+
+    // 5. 파일 목록 초기화
+    clearAttachedFiles(); // 새 함수 호출
 
     console.log(
       "New Chat UI reset. Session ID will be created on first message."
@@ -1179,6 +1385,8 @@ document.addEventListener("DOMContentLoaded", async () => {
     await syncMCPState();
     loadHistory();
     updateHistoryUI();
+    // 초기화 시 파일 UI도 업데이트
+    clearAttachedFiles(); // 새 함수 호출
     console.log("✅ ChatTron initialization complete");
   } catch (error) {
     console.error("❌ Initialization failed:", error);
@@ -1186,6 +1394,8 @@ document.addEventListener("DOMContentLoaded", async () => {
     updateMCPUI();
     loadHistory();
     updateHistoryUI();
+    // 초기화 시 파일 UI도 업데이트
+    clearAttachedFiles(); // 새 함수 호출
   }
 
   // Send 버튼 클릭 이벤트

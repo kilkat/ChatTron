@@ -127,6 +127,12 @@
       </div>
 
       <div class="flex flex-col flex-1 max-w-[960px] mx-auto overflow-hidden">
+        <div id="file-upload-section" class="mb-4 p-3 border rounded-lg bg-white sticky top-0 z-10 hidden">
+          <h3 class="text-sm font-semibold mb-2">Attached Files:</h3>
+          <div id="uploaded-files-list" class="flex flex-wrap gap-2 mb-2 max-h-24 overflow-y-auto">
+            </div>
+          <button id="clear-all-files-btn" class="text-xs text-red-500 hover:text-red-700 hidden">Clear All Files</button>
+        </div>
         <div
           class="flex-1 overflow-y-auto px-4 py-3 gap-2 flex flex-col"
           id="chat-panel"
@@ -153,7 +159,8 @@
                 ></textarea>
                 <div class="flex items-center bg-[#e7edf4] pr-4 rounded-r-lg">
                   <div class="flex items-center gap-4">
-                    <button class="min-w-[24px] min-h-[24px]">
+                    <input type="file" id="file-input" multiple class="hidden" />
+                    <button id="attach-btn" class="min-w-[24px] min-h-[24px]">
                       <img
                         src="../assets/icons/attach.svg"
                         width="24"

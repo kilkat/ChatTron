@@ -1,5 +1,6 @@
 const { app, BrowserWindow, ipcMain } = require("electron");
 const path = require("path");
+// const fs = require("fs").promises; // fs.promises import 제거
 const { mcp } = require("./mcp");
 
 let mcpToolRegistry = {};
