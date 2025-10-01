@@ -35,42 +35,20 @@ function updateUploadedFilesUI() {
   }
 }
 
-// chunked 형식으로 응답이 반환되는 경우
-function parseStreamChunk(chunk) {
-  // "275{...}0" 형식의 청크에서 JSON 부분 추출
-  const lines = chunk.split('\n').filter(line => line.trim());
-  let jsonData = '';
-  
-  for (const line of lines) {
-    try {
-      // 청크 크기 정보를 제거하고 JSON만 추출
-      // 형식: 크기{JSON데이터}0 또는 data: {JSON데이터}
-      
-      // SSE (Server-Sent Events) 형식 처리
-      if (line.startsWith('data: ')) {
-        const data = line.substring(6).trim();
-        if (data === '[DONE]') continue;
-        jsonData += data;
-        continue;
-      }
-      
-      // 청크 크기가 포함된 형식 처리 (예: 275{...}0)
-      const match = line.match(/^\d+(.+?)0?$/);
-      if (match) {
-        jsonData += match[1];
-        continue;
-      }
-      
-      // 순수 JSON인 경우
-      if (line.startsWith('{') || line.startsWith('[')) {
-        jsonData += line;
-      }
-    } catch (e) {
-      console.warn('Failed to parse chunk line:', line, e);
-    }
+function parseSSELine(line) {
+  // SSE 형식: "data: {...}" 
+  if (line.startsWith('data: ')) {
+    const data = line.substring(6).trim();
+    if (data === '[DONE]' || data === '') return null;
+    return data;
   }
   
-  return jsonData;
+  // 순수 JSON 라인
+  if (line.startsWith('{') || line.startsWith('[')) {
+    return line;
+  }
+  
+  return null;
 }
 
 // 스트리밍 응답을 처리하는 함수
@@ -98,15 +76,16 @@ async function handleStreamingResponse(response) {
     
     buffer += decodedChunk;
     
-    // 완전한 청크들을 처리
+    // 줄 단위로 분리 (SSE는 \n으로 구분)
     const lines = buffer.split('\n');
     buffer = lines.pop() || ''; // 마지막 불완전한 라인은 버퍼에 보관
     
     console.log(`📋 Processing ${lines.length} lines from chunk ${chunkCount}`);
     
     for (let i = 0; i < lines.length; i++) {
-      const line = lines[i];
-      if (!line.trim()) {
+      const line = lines[i].trim();
+      
+      if (!line) {
         console.log(`⏭️ Line ${i + 1}: Empty, skipping`);
         continue;
       }
@@ -114,81 +93,36 @@ async function handleStreamingResponse(response) {
       console.log(`🔍 Line ${i + 1} raw (${line.length} chars):`, 
                   line.substring(0, 150) + (line.length > 150 ? '...' : ''));
       
+      // SSE 형식에서 JSON 추출
+      const jsonStr = parseSSELine(line);
+      
+      if (!jsonStr) {
+        console.log(`⏭️ Line ${i + 1}: Not a valid SSE data line`);
+        continue;
+      }
+      
+      console.log(`📄 Extracted JSON string:`, jsonStr.substring(0, 100));
+      
       try {
-        // SSE 형식 처리
-        if (line.startsWith('data: ')) {
-          const data = line.substring(6).trim();
-          console.log(`📨 SSE format detected, data:`, data.substring(0, 100));
-          
-          if (data === '[DONE]') {
-            console.log('🏁 [DONE] marker received');
-            continue;
-          }
-          
-          const parsed = JSON.parse(data);
-          console.log('✅ SSE JSON parsed successfully:', parsed);
-          
-          const content = parsed.choices?.[0]?.delta?.content || 
-                         parsed.delta?.content ||
-                         parsed.message?.content ||
-                         parsed.content ||
-                         '';
-          
-          if (content) {
-            console.log(`📝 Extracted content (${content.length} chars):`, content);
-            fullContent += content;
-          } else {
-            console.log('⚠️ No content found in parsed SSE data');
-          }
-        } 
-        // 일반 JSON 처리
-        else if (line.startsWith('{')) {
-          console.log('📄 Plain JSON format detected');
-          const parsed = JSON.parse(line);
-          console.log('✅ Plain JSON parsed successfully:', parsed);
-          
-          const content = parsed.choices?.[0]?.delta?.content || 
-                         parsed.delta?.content ||
-                         parsed.message?.content ||
-                         parsed.content ||
-                         '';
-          
-          if (content) {
-            console.log(`📝 Extracted content (${content.length} chars):`, content);
-            fullContent += content;
-          } else {
-            console.log('⚠️ No content found in parsed JSON');
-          }
-        }
-        // 청크 크기가 포함된 형식 처리
-        else {
-          console.log('🔢 Chunked format detected, parsing...');
-          const jsonPart = parseStreamChunk(line);
-          console.log('📦 Parsed jsonPart:', jsonPart ? jsonPart.substring(0, 100) : 'null');
-          
-          if (jsonPart) {
-            const parsed = JSON.parse(jsonPart);
-            console.log('✅ Chunked JSON parsed successfully:', parsed);
-            
-            const content = parsed.choices?.[0]?.delta?.content || 
-                           parsed.delta?.content ||
-                           parsed.message?.content ||
-                           parsed.content ||
-                           '';
-            
-            if (content) {
-              console.log(`📝 Extracted content (${content.length} chars):`, content);
-              fullContent += content;
-            } else {
-              console.log('⚠️ No content found in parsed chunked data');
-            }
-          } else {
-            console.log('⚠️ parseStreamChunk returned null');
-          }
+        const parsed = JSON.parse(jsonStr);
+        console.log('✅ JSON parsed successfully:', parsed);
+        
+        // 다양한 응답 형식에서 content 추출
+        const content = parsed.choices?.[0]?.delta?.content || 
+                       parsed.delta?.content ||
+                       parsed.message?.content ||
+                       parsed.content ||
+                       '';
+        
+        if (content) {
+          console.log(`📝 Extracted content (${content.length} chars):`, content);
+          fullContent += content;
+        } else {
+          console.log('⚠️ No content found in parsed data');
         }
       } catch (e) {
-        console.error(`❌ Failed to parse line ${i + 1}:`, line);
-        console.error('Error details:', e.message, e.stack);
+        console.error(`❌ Failed to parse JSON from line ${i + 1}:`, jsonStr);
+        console.error('Error details:', e.message);
       }
     }
   }
@@ -196,12 +130,12 @@ async function handleStreamingResponse(response) {
   // 남은 버퍼 처리
   if (buffer.trim()) {
     console.log('🔚 Processing remaining buffer:', buffer.substring(0, 100));
-    try {
-      const jsonPart = parseStreamChunk(buffer);
-      console.log('📦 Final buffer parsed jsonPart:', jsonPart ? jsonPart.substring(0, 100) : 'null');
-      
-      if (jsonPart) {
-        const parsed = JSON.parse(jsonPart);
+    
+    const jsonStr = parseSSELine(buffer.trim());
+    
+    if (jsonStr) {
+      try {
+        const parsed = JSON.parse(jsonStr);
         console.log('✅ Final buffer parsed successfully:', parsed);
         
         const content = parsed.choices?.[0]?.delta?.content || 
@@ -214,10 +148,10 @@ async function handleStreamingResponse(response) {
           console.log(`📝 Final content (${content.length} chars):`, content);
           fullContent += content;
         }
+      } catch (e) {
+        console.error('❌ Failed to parse final buffer JSON:', jsonStr);
+        console.error('Error details:', e.message);
       }
-    } catch (e) {
-      console.error('❌ Failed to parse final buffer:', buffer);
-      console.error('Error details:', e.message, e.stack);
     }
   }
   
