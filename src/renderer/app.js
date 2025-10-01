@@ -35,6 +35,133 @@ function updateUploadedFilesUI() {
   }
 }
 
+// chunked 형식으로 응답이 반환되는 경우
+function parseStreamChunk(chunk) {
+  // "275{...}0" 형식의 청크에서 JSON 부분 추출
+  const lines = chunk.split('\n').filter(line => line.trim());
+  let jsonData = '';
+  
+  for (const line of lines) {
+    try {
+      // 청크 크기 정보를 제거하고 JSON만 추출
+      // 형식: 크기{JSON데이터}0 또는 data: {JSON데이터}
+      
+      // SSE (Server-Sent Events) 형식 처리
+      if (line.startsWith('data: ')) {
+        const data = line.substring(6).trim();
+        if (data === '[DONE]') continue;
+        jsonData += data;
+        continue;
+      }
+      
+      // 청크 크기가 포함된 형식 처리 (예: 275{...}0)
+      const match = line.match(/^\d+(.+?)0?$/);
+      if (match) {
+        jsonData += match[1];
+        continue;
+      }
+      
+      // 순수 JSON인 경우
+      if (line.startsWith('{') || line.startsWith('[')) {
+        jsonData += line;
+      }
+    } catch (e) {
+      console.warn('Failed to parse chunk line:', line, e);
+    }
+  }
+  
+  return jsonData;
+}
+
+// 스트리밍 응답을 처리하는 함수
+async function handleStreamingResponse(response) {
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  let fullContent = '';
+  
+  while (true) {
+    const { done, value } = await reader.read();
+    
+    if (done) break;
+    
+    buffer += decoder.decode(value, { stream: true });
+    
+    // 완전한 청크들을 처리
+    const lines = buffer.split('\n');
+    buffer = lines.pop() || ''; // 마지막 불완전한 라인은 버퍼에 보관
+    
+    for (const line of lines) {
+      if (!line.trim()) continue;
+      
+      try {
+        // SSE 형식 처리
+        if (line.startsWith('data: ')) {
+          const data = line.substring(6).trim();
+          if (data === '[DONE]') continue;
+          
+          const parsed = JSON.parse(data);
+          const content = parsed.choices?.[0]?.delta?.content || 
+                         parsed.delta?.content ||
+                         parsed.message?.content ||
+                         parsed.content ||
+                         '';
+          
+          fullContent += content;
+        } 
+        // 일반 JSON 처리
+        else if (line.startsWith('{')) {
+          const parsed = JSON.parse(line);
+          const content = parsed.choices?.[0]?.delta?.content || 
+                         parsed.delta?.content ||
+                         parsed.message?.content ||
+                         parsed.content ||
+                         '';
+          
+          fullContent += content;
+        }
+        // 청크 크기가 포함된 형식 처리
+        else {
+          const jsonPart = parseStreamChunk(line);
+          if (jsonPart) {
+            const parsed = JSON.parse(jsonPart);
+            const content = parsed.choices?.[0]?.delta?.content || 
+                           parsed.delta?.content ||
+                           parsed.message?.content ||
+                           parsed.content ||
+                           '';
+            
+            fullContent += content;
+          }
+        }
+      } catch (e) {
+        console.warn('Failed to parse streaming line:', line, e);
+      }
+    }
+  }
+  
+  // 남은 버퍼 처리
+  if (buffer.trim()) {
+    try {
+      const jsonPart = parseStreamChunk(buffer);
+      if (jsonPart) {
+        const parsed = JSON.parse(jsonPart);
+        const content = parsed.choices?.[0]?.delta?.content || 
+                       parsed.delta?.content ||
+                       parsed.message?.content ||
+                       parsed.content ||
+                       '';
+        
+        fullContent += content;
+      }
+    } catch (e) {
+      console.warn('Failed to parse final buffer:', buffer, e);
+    }
+  }
+  
+  return fullContent;
+}
+
 // 첨부 파일 목록을 초기화하는 새로운 함수
 function clearAttachedFiles() {
   uploadedFiles = [];
@@ -97,7 +224,6 @@ chatPanel?.addEventListener("drop", (event) => {
   }
 });
 // --- 드래그 앤 드롭 핸들러 끝 ---
-
 // --- 파일 업로드 관련 변수 및 함수 끝 ---
 
 async function findToolViaLLM(prompt, tools) {
@@ -125,8 +251,6 @@ async function findToolViaLLM(prompt, tools) {
   const clientList = Array.from(clientSet);
   const toolList = Array.from(toolSet);
 
-  // 통합된 프롬프트 - 단일/다중 자동 판단
-  // 하드코딩된 문자열 대신 로드된 llmToolMatchingPrompt 사용
   const formattedLlmPrompt = llmToolMatchingPrompt
     .replace("{{CLIENT_LIST}}", JSON.stringify(clientList, null, 2))
     .replace("{{TOOL_LIST}}", JSON.stringify(toolList, null, 2))
@@ -142,7 +266,7 @@ async function findToolViaLLM(prompt, tools) {
       },
       { role: "user", content: formattedLlmPrompt },
     ],
-    stream: false,
+    stream: true, // 스트리밍 활성화
   };
 
   const headers = {
@@ -150,16 +274,14 @@ async function findToolViaLLM(prompt, tools) {
     ...(apiKey && { Authorization: `Bearer ${apiKey}` }),
   };
 
-  // 통합된 JSON 추출 함수 - 객체 또는 배열 처리
   function extractToolDataFromText(text) {
     console.log("🔍 Extracting tool data from text:", text);
 
-    // 1. 전체 텍스트가 JSON인지 확인 (객체 또는 배열)
+    // 1. 전체 텍스트가 JSON인지 확인
     try {
       const trimmedText = text.trim();
       const parsed = JSON.parse(trimmedText);
 
-      // 배열인 경우
       if (Array.isArray(parsed)) {
         const validArray = parsed.filter(
           (item) =>
@@ -169,9 +291,7 @@ async function findToolViaLLM(prompt, tools) {
           console.log("✅ Direct array parse successful:", validArray);
           return { type: "multiple", tools: validArray };
         }
-      }
-      // 객체인 경우
-      else if (
+      } else if (
         parsed.client &&
         parsed.toolName &&
         typeof parsed.args === "object"
@@ -207,14 +327,11 @@ async function findToolViaLLM(prompt, tools) {
           return { type: "single", tool: parsed };
         }
       } catch (e) {
-        console.warn(
-          "⚠️ JSON parse failed from markdown block:",
-          markdownMatch[1]
-        );
+        console.warn("⚠️ JSON parse failed from markdown block");
       }
     }
 
-    // 3. 배열 패턴 먼저 찾기 (대괄호로 시작)
+    // 3. 배열 패턴 찾기
     const arrayMatch = text.match(/\[[\s\S]*\]/);
     if (arrayMatch) {
       try {
@@ -234,11 +351,10 @@ async function findToolViaLLM(prompt, tools) {
       }
     }
 
-    // 4. 객체 패턴 찾기 (중괄호 블록들)
+    // 4. 객체 패턴 찾기
     const jsonBlocks = [...text.matchAll(/\{[\s\S]*?\}/g)];
     console.log(`🔍 Found ${jsonBlocks.length} potential JSON blocks`);
 
-    // 여러 객체가 있으면 배열로 처리
     const validObjects = [];
     for (const match of jsonBlocks) {
       try {
@@ -254,10 +370,7 @@ async function findToolViaLLM(prompt, tools) {
     }
 
     if (validObjects.length > 1) {
-      console.log(
-        "✅ Multiple objects found, treating as array:",
-        validObjects
-      );
+      console.log("✅ Multiple objects found, treating as array:", validObjects);
       return { type: "multiple", tools: validObjects };
     } else if (validObjects.length === 1) {
       console.log("✅ Single object found:", validObjects[0]);
@@ -270,7 +383,6 @@ async function findToolViaLLM(prompt, tools) {
 
   try {
     console.log("🛰️ Sending request to LLM:", { apiUrl, modelName, provider });
-
     const startTime = Date.now();
 
     const res = await fetch(apiUrl, {
@@ -292,22 +404,30 @@ async function findToolViaLLM(prompt, tools) {
       throw new Error(`HTTP ${res.status}: ${errorText}`);
     }
 
-    const data = await res.json();
-    console.log("🧾 Full LLM response JSON object:", data);
+    let text = '';
 
-    const text =
-      data.choices?.[0]?.message?.content ||
-      data.message?.content ||
-      data.content ||
-      data.response ||
-      "";
+    // 스트리밍 응답 처리
+    if (res.headers.get('content-type')?.includes('text/event-stream') || 
+        res.headers.get('transfer-encoding') === 'chunked') {
+      console.log("📡 Processing streaming response...");
+      text = await handleStreamingResponse(res);
+    } else {
+      // 일반 응답 처리
+      const data = await res.json();
+      console.log("🧾 Full LLM response JSON object:", data);
+      
+      text = data.choices?.[0]?.message?.content ||
+             data.message?.content ||
+             data.content ||
+             data.response ||
+             "";
+    }
 
-    console.log("📩 Raw LLM response text:\n", text);
+    console.log("📩 Final assembled text:\n", text);
 
     const result = extractToolDataFromText(text);
 
     if (result) {
-      // 유효성 검증 및 기존 구조에 맞게 반환
       if (result.type === "single") {
         const tool = result.tool;
         const validClient = clientList.includes(tool.client);
@@ -315,7 +435,6 @@ async function findToolViaLLM(prompt, tools) {
 
         if (validClient && validTool) {
           console.log("✅ Single tool validated:", tool);
-          // 기존 구조에 맞게 반환 (client, toolName, args)
           return {
             client: tool.client,
             toolName: tool.toolName,
@@ -348,7 +467,6 @@ async function findToolViaLLM(prompt, tools) {
             );
           }
 
-          // 다중 도구 표시를 위해 특별한 구조로 반환
           return {
             isMultiple: true,
             tools: validTools,
