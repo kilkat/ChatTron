@@ -79,85 +79,150 @@ async function handleStreamingResponse(response) {
   const decoder = new TextDecoder();
   let buffer = '';
   let fullContent = '';
+  let chunkCount = 0;
+  
+  console.log('🔄 Starting stream processing...');
   
   while (true) {
     const { done, value } = await reader.read();
     
-    if (done) break;
+    if (done) {
+      console.log(`✅ Stream complete. Total chunks processed: ${chunkCount}`);
+      break;
+    }
     
-    buffer += decoder.decode(value, { stream: true });
+    chunkCount++;
+    const decodedChunk = decoder.decode(value, { stream: true });
+    console.log(`📦 Chunk ${chunkCount} received (${decodedChunk.length} bytes):`, 
+                decodedChunk.substring(0, 100) + (decodedChunk.length > 100 ? '...' : ''));
+    
+    buffer += decodedChunk;
     
     // 완전한 청크들을 처리
     const lines = buffer.split('\n');
     buffer = lines.pop() || ''; // 마지막 불완전한 라인은 버퍼에 보관
     
-    for (const line of lines) {
-      if (!line.trim()) continue;
+    console.log(`📋 Processing ${lines.length} lines from chunk ${chunkCount}`);
+    
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      if (!line.trim()) {
+        console.log(`⏭️ Line ${i + 1}: Empty, skipping`);
+        continue;
+      }
+      
+      console.log(`🔍 Line ${i + 1} raw (${line.length} chars):`, 
+                  line.substring(0, 150) + (line.length > 150 ? '...' : ''));
       
       try {
         // SSE 형식 처리
         if (line.startsWith('data: ')) {
           const data = line.substring(6).trim();
-          if (data === '[DONE]') continue;
+          console.log(`📨 SSE format detected, data:`, data.substring(0, 100));
+          
+          if (data === '[DONE]') {
+            console.log('🏁 [DONE] marker received');
+            continue;
+          }
           
           const parsed = JSON.parse(data);
+          console.log('✅ SSE JSON parsed successfully:', parsed);
+          
           const content = parsed.choices?.[0]?.delta?.content || 
                          parsed.delta?.content ||
                          parsed.message?.content ||
                          parsed.content ||
                          '';
           
-          fullContent += content;
+          if (content) {
+            console.log(`📝 Extracted content (${content.length} chars):`, content);
+            fullContent += content;
+          } else {
+            console.log('⚠️ No content found in parsed SSE data');
+          }
         } 
         // 일반 JSON 처리
         else if (line.startsWith('{')) {
+          console.log('📄 Plain JSON format detected');
           const parsed = JSON.parse(line);
+          console.log('✅ Plain JSON parsed successfully:', parsed);
+          
           const content = parsed.choices?.[0]?.delta?.content || 
                          parsed.delta?.content ||
                          parsed.message?.content ||
                          parsed.content ||
                          '';
           
-          fullContent += content;
+          if (content) {
+            console.log(`📝 Extracted content (${content.length} chars):`, content);
+            fullContent += content;
+          } else {
+            console.log('⚠️ No content found in parsed JSON');
+          }
         }
         // 청크 크기가 포함된 형식 처리
         else {
+          console.log('🔢 Chunked format detected, parsing...');
           const jsonPart = parseStreamChunk(line);
+          console.log('📦 Parsed jsonPart:', jsonPart ? jsonPart.substring(0, 100) : 'null');
+          
           if (jsonPart) {
             const parsed = JSON.parse(jsonPart);
+            console.log('✅ Chunked JSON parsed successfully:', parsed);
+            
             const content = parsed.choices?.[0]?.delta?.content || 
                            parsed.delta?.content ||
                            parsed.message?.content ||
                            parsed.content ||
                            '';
             
-            fullContent += content;
+            if (content) {
+              console.log(`📝 Extracted content (${content.length} chars):`, content);
+              fullContent += content;
+            } else {
+              console.log('⚠️ No content found in parsed chunked data');
+            }
+          } else {
+            console.log('⚠️ parseStreamChunk returned null');
           }
         }
       } catch (e) {
-        console.warn('Failed to parse streaming line:', line, e);
+        console.error(`❌ Failed to parse line ${i + 1}:`, line);
+        console.error('Error details:', e.message, e.stack);
       }
     }
   }
   
   // 남은 버퍼 처리
   if (buffer.trim()) {
+    console.log('🔚 Processing remaining buffer:', buffer.substring(0, 100));
     try {
       const jsonPart = parseStreamChunk(buffer);
+      console.log('📦 Final buffer parsed jsonPart:', jsonPart ? jsonPart.substring(0, 100) : 'null');
+      
       if (jsonPart) {
         const parsed = JSON.parse(jsonPart);
+        console.log('✅ Final buffer parsed successfully:', parsed);
+        
         const content = parsed.choices?.[0]?.delta?.content || 
                        parsed.delta?.content ||
                        parsed.message?.content ||
                        parsed.content ||
                        '';
         
-        fullContent += content;
+        if (content) {
+          console.log(`📝 Final content (${content.length} chars):`, content);
+          fullContent += content;
+        }
       }
     } catch (e) {
-      console.warn('Failed to parse final buffer:', buffer, e);
+      console.error('❌ Failed to parse final buffer:', buffer);
+      console.error('Error details:', e.message, e.stack);
     }
   }
+  
+  console.log(`🎉 Stream processing complete. Total content length: ${fullContent.length} chars`);
+  console.log('📄 Full content preview:', fullContent.substring(0, 200));
   
   return fullContent;
 }
