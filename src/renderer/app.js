@@ -57,107 +57,61 @@ async function handleStreamingResponse(response) {
   const decoder = new TextDecoder();
   let buffer = '';
   let fullContent = '';
-  let chunkCount = 0;
-  
-  console.log('🔄 Starting stream processing...');
-  
+
   while (true) {
     const { done, value } = await reader.read();
-    
-    if (done) {
-      console.log(`✅ Stream complete. Total chunks processed: ${chunkCount}`);
-      break;
-    }
-    
-    chunkCount++;
-    const decodedChunk = decoder.decode(value, { stream: true });
-    console.log(`📦 Chunk ${chunkCount} received (${decodedChunk.length} bytes):`, 
-                decodedChunk.substring(0, 100) + (decodedChunk.length > 100 ? '...' : ''));
-    
-    buffer += decodedChunk;
-    
-    // 줄 단위로 분리 (SSE는 \n으로 구분)
-    const lines = buffer.split('\n');
-    buffer = lines.pop() || ''; // 마지막 불완전한 라인은 버퍼에 보관
-    
-    console.log(`📋 Processing ${lines.length} lines from chunk ${chunkCount}`);
-    
-    for (let i = 0; i < lines.length; i++) {
-      const line = lines[i].trim();
-      
-      if (!line) {
-        console.log(`⏭️ Line ${i + 1}: Empty, skipping`);
-        continue;
-      }
-      
-      console.log(`🔍 Line ${i + 1} raw (${line.length} chars):`, 
-                  line.substring(0, 150) + (line.length > 150 ? '...' : ''));
-      
-      // SSE 형식에서 JSON 추출
-      const jsonStr = parseSSELine(line);
-      
-      if (!jsonStr) {
-        console.log(`⏭️ Line ${i + 1}: Not a valid SSE data line`);
-        continue;
-      }
-      
-      console.log(`📄 Extracted JSON string:`, jsonStr.substring(0, 100));
-      
-      try {
-        const parsed = JSON.parse(jsonStr);
-        console.log('✅ JSON parsed successfully:', parsed);
-        
-        // 다양한 응답 형식에서 content 추출
-        const content = parsed.choices?.[0]?.delta?.content || 
-                       parsed.delta?.content ||
-                       parsed.message?.content ||
-                       parsed.content ||
-                       '';
-        
-        if (content) {
-          console.log(`📝 Extracted content (${content.length} chars):`, content);
-          fullContent += content;
-        } else {
-          console.log('⚠️ No content found in parsed data');
+    if (done) break;
+
+    buffer += decoder.decode(value, { stream: true });
+
+    // SSE (Server-Sent Events) 형식 처리
+    let newlineIndex;
+    while ((newlineIndex = buffer.indexOf('\n')) !== -1) {
+      const line = buffer.slice(0, newlineIndex).trim();
+      buffer = buffer.slice(newlineIndex + 1);
+
+      if (line.startsWith('data: ')) {
+        const jsonStr = line.substring(6).trim();
+        if (jsonStr === '[DONE]') continue;
+        try {
+          const parsed = JSON.parse(jsonStr);
+          const content = parsed.choices?.[0]?.delta?.content ||
+                         parsed.delta?.content ||
+                         parsed.message?.content ||
+                         parsed.content ||
+                         '';
+          if (content) fullContent += content;
+        } catch (e) {
+          console.warn("Malformed JSON in SSE stream ignored:", jsonStr);
         }
-      } catch (e) {
-        console.error(`❌ Failed to parse JSON from line ${i + 1}:`, jsonStr);
-        console.error('Error details:', e.message);
       }
     }
   }
-  
-  // 남은 버퍼 처리
+
+  // 스트림이 끝난 후 남은 버퍼 처리
   if (buffer.trim()) {
-    console.log('🔚 Processing remaining buffer:', buffer.substring(0, 100));
-    
-    const jsonStr = parseSSELine(buffer.trim());
-    
-    if (jsonStr) {
+    // 여러 JSON 객체가 붙어있는 경우를 대비해 분리 시도
+    const potentialJsons = buffer.trim().replace(/}\s*{/g, '}|--|{').split('|--|');
+    potentialJsons.forEach(jsonStr => {
       try {
         const parsed = JSON.parse(jsonStr);
-        console.log('✅ Final buffer parsed successfully:', parsed);
-        
-        const content = parsed.choices?.[0]?.delta?.content || 
+        const content = parsed.choices?.[0]?.message?.content ||
+                       parsed.choices?.[0]?.delta?.content ||
                        parsed.delta?.content ||
                        parsed.message?.content ||
                        parsed.content ||
+                       parsed.response ||
                        '';
-        
-        if (content) {
-          console.log(`📝 Final content (${content.length} chars):`, content);
-          fullContent += content;
-        }
+        if (content) fullContent += content;
       } catch (e) {
-        console.error('❌ Failed to parse final buffer JSON:', jsonStr);
-        console.error('Error details:', e.message);
+        // JSON 파싱 실패 시, 이미 처리된 내용이 없다면 그냥 텍스트로 추가
+        if (!fullContent) {
+            fullContent += buffer.trim();
+        }
       }
-    }
+    });
   }
-  
-  console.log(`🎉 Stream processing complete. Total content length: ${fullContent.length} chars`);
-  console.log('📄 Full content preview:', fullContent.substring(0, 200));
-  
+
   return fullContent;
 }
 
@@ -1195,11 +1149,11 @@ User request:
               reader.readAsDataURL(file); // 이미지를 Data URL (Base64)로 읽기
             });
             console.log(`Image ${file.name} read as Base64. Data URL: ${dataUrl.substring(0, 50)}...`);
-            
+
             // 이곳에서 LLM API에 맞는 이미지 형식으로 contentParts에 추가해야 합니다.
             // 예를 들어 OpenAI의 경우:
             // contentParts.push({ type: "image_url", image_url: { url: dataUrl } });
-            
+
             // 현재는 콘솔에 출력만 하고, LLM 프롬프트에는 포함하지 않습니다.
             // LLM이 멀티모달을 지원하지 않거나 API 형식이 맞지 않으면 오류가 발생할 수 있습니다.
             contentParts.push({
@@ -1403,14 +1357,14 @@ User request:
                 { role: "system", content: systemPrompt }, // 로드된 systemPrompt 사용
                 { role: "user", content: finalPrompt }, // <-- finalPrompt 사용
               ],
-              stream: false,
+              stream: true, // <-- 스트리밍을 기본으로 활성화
             };
             break;
           case "anthropic":
             payload = {
               model: modelName,
               messages: [{ role: "user", content: finalPrompt }], // <-- finalPrompt 사용
-              stream: false,
+              stream: true, // <-- 스트리밍을 기본으로 활성화
               max_tokens: 1024,
             };
             break;
@@ -1444,29 +1398,13 @@ User request:
           throw new Error(`HTTP ${res.status}: ${errorText}`);
         }
 
-        const data = await res.json();
-        console.log("📋 LLM response data:", data);
+        // --- 수정된 부분 시작 ---
+        // 항상 스트리밍 핸들러를 사용하여 응답 처리
+        reply = await handleStreamingResponse(res);
+        // --- 수정된 부분 끝 ---
 
-        switch (provider) {
-          case "openai":
-            reply = data.choices?.[0]?.message?.content || "No response";
-            break;
-          case "ollama":
-            reply = data.message?.content || data.response || "No response";
-            break;
-          case "anthropic":
-            reply = data.content || "No response";
-            break;
-          case "localfastapi":
-          case "custom":
-            reply =
-              data.choices?.[0]?.message?.content ||
-              data.message?.content ||
-              data.content ||
-              data.response ||
-              data.text ||
-              (typeof data === "string" ? data : JSON.stringify(data));
-            break;
+        if (!reply) {
+            reply = "No response from the model.";
         }
 
         // 챗 메시지 제거
@@ -1593,7 +1531,7 @@ User request:
 
   // Send 버튼 클릭 이벤트
   sendBtn?.addEventListener("click", handlePromptSubmission);
-  
+
   // MCP 도구 목록 버튼 클릭 이벤트
   listMcpToolsBtn?.addEventListener("click", handleListMcpTools);
 
