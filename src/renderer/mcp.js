@@ -7,8 +7,29 @@ document.addEventListener("DOMContentLoaded", () => {
   const jsonPreview = document.getElementById("mcp-json-preview");
 
   const saveBtn = document.getElementById("save-mcp-btn");
-  const deleteBtn = document.getElementById("delete-mcp-btn"); // 삭제 버튼
+  const deleteBtn = document.getElementById("delete-mcp-btn");
   const backBtn = document.getElementById("back-btn");
+  const loaderOverlay = document.getElementById("loader-overlay");
+
+  // --- 스피너 제어 함수 ---
+  // 스피너를 보여주는 유일한 함수
+  function showLoader() {
+    console.log("✅ [DEBUG] Showing loader...");
+    if (loaderOverlay) {
+      loaderOverlay.classList.remove("hidden");
+    }
+  }
+
+  // 스피너를 숨기는 유일한 함수
+  function hideLoader() {
+    console.log("✅ [DEBUG] Hiding loader...");
+    if (loaderOverlay) {
+      loaderOverlay.classList.add("hidden");
+    }
+  }
+
+  // 페이지 로드 시에는 스피너가 항상 숨겨져 있도록 강제합니다.
+  hideLoader();
 
   // 1. JSON 입력 시 → 각 필드에 값 반영
   jsonPreview.addEventListener("input", () => {
@@ -43,7 +64,7 @@ document.addEventListener("DOMContentLoaded", () => {
     el.addEventListener("input", updateJsonPreview)
   );
 
-  // 3. 저장 버튼 → MCP 서버 추가 및 활성화
+  // 3. 저장 버튼 클릭 시에만 스피너 동작하도록 수정
   saveBtn.addEventListener("click", async () => {
     const server = {
       key: keyInput.value.trim(),
@@ -56,33 +77,25 @@ document.addEventListener("DOMContentLoaded", () => {
         .filter(Boolean),
     };
 
-    // 필수 필드 검증
-    if (!server.key) {
-      return alert("Key is required");
-    }
+    if (!server.key) return alert("Key is required");
+    if (!server.command) return alert("Command is required");
 
-    if (!server.command) {
-      return alert("Command is required");
-    }
-
-    console.log("Saving server configuration:", server);
-
-    // sessionStorage에 서버 목록 업데이트
-    let serverList =
-      JSON.parse(sessionStorage.getItem("mcp-server-list")) || [];
-
-    // 기존 서버가 있으면 업데이트, 없으면 추가
-    const existingIndex = serverList.findIndex((s) => s.key === server.key);
-    if (existingIndex >= 0) {
-      serverList[existingIndex] = server;
-    } else {
-      serverList.push(server);
-    }
-
-    sessionStorage.setItem("mcp-server-list", JSON.stringify(serverList));
+    // 로딩 상태 시작 (오직 여기서만 showLoader 호출)
+    showLoader();
 
     try {
-      // 서버 설정 저장
+      console.log("Saving server configuration:", server);
+
+      let serverList =
+        JSON.parse(sessionStorage.getItem("mcp-server-list")) || [];
+      const existingIndex = serverList.findIndex((s) => s.key === server.key);
+      if (existingIndex >= 0) {
+        serverList[existingIndex] = server;
+      } else {
+        serverList.push(server);
+      }
+      sessionStorage.setItem("mcp-server-list", JSON.stringify(serverList));
+
       try {
         await window.mcpAPI.addServer(server);
       } catch (e) {
@@ -93,11 +106,9 @@ document.addEventListener("DOMContentLoaded", () => {
         }
       }
 
-      // 서버 활성화
       await window.mcpAPI.activate(server);
       alert("Server saved and activated successfully.");
 
-      // 활성화된 클라이언트 목록 업데이트
       let activeClients =
         JSON.parse(sessionStorage.getItem("active-clients")) || [];
       if (!activeClients.includes(server.key)) {
@@ -107,6 +118,9 @@ document.addEventListener("DOMContentLoaded", () => {
     } catch (err) {
       console.error("Save/activate error:", err);
       alert("Failed to save or activate: " + err.message);
+    } finally {
+      // 로딩 상태 종료 (오직 여기서만 hideLoader 호출)
+      hideLoader();
     }
 
     updateJsonPreview();
@@ -120,72 +134,25 @@ document.addEventListener("DOMContentLoaded", () => {
     console.log(`🗑️ Starting deletion process for server: ${selectedKey}`);
 
     try {
-      // 🎯 백엔드에서 서버 제거
-      const result = await window.mcpAPI.removeServer(selectedKey);
-      console.log(`✅ Backend removal result: ${result}`);
+      await window.mcpAPI.removeServer(selectedKey);
+      console.log(`✅ Backend removal successful`);
 
-      // 🎯 백엔드 성공 후 프론트엔드 정리
-      console.log(`🧹 Cleaning up frontend storage for: ${selectedKey}`);
-
-      // serverList에서 제거
       let serverList =
         JSON.parse(sessionStorage.getItem("mcp-server-list")) || [];
-      const originalLength = serverList.length;
       serverList = serverList.filter((server) => server.key !== selectedKey);
-      console.log(
-        `📋 Removed from serverList: ${originalLength} → ${serverList.length}`
-      );
       sessionStorage.setItem("mcp-server-list", JSON.stringify(serverList));
 
-      // activeClients에서 제거
       let activeClients =
         JSON.parse(sessionStorage.getItem("active-clients")) || [];
-      const originalActiveLength = activeClients.length;
       activeClients = activeClients.filter((key) => key !== selectedKey);
-      console.log(
-        `🔗 Removed from activeClients: ${originalActiveLength} → ${activeClients.length}`
-      );
       sessionStorage.setItem("active-clients", JSON.stringify(activeClients));
 
-      // 선택된 키 정리
       sessionStorage.removeItem("selected-mcp-key");
-      console.log(`🔑 Cleared selected-mcp-key`);
-
       alert("Server deleted successfully!");
-
-      // 3. 메인 페이지로 리다이렉트
-      console.log(`🔄 Redirecting to main page...`);
       window.location.href = "index.html";
     } catch (err) {
       console.error("❌ Failed to delete server:", err);
-
-      // 사용자에게 더 친화적인 메시지 표시 -> 해당 메세지로 인해 사용자 혼란 가중 -> 실제 기능 동작에는 문제 없음 확인
-      // const userMessage = err.message.includes("not found")
-      //   ? `Server "${selectedKey}" was already removed or doesn't exist.`
-      //   : `Failed to delete server: ${err.message}`;
-
-      // alert(userMessage);
-
-      // "not found" 오류의 경우 프론트엔드만 정리하고 계속 진행
-      if (err.message.includes("not found")) {
-        console.log(
-          `🔄 Cleaning up frontend only for non-existent server: ${selectedKey}`
-        );
-
-        let serverList =
-          JSON.parse(sessionStorage.getItem("mcp-server-list")) || [];
-        serverList = serverList.filter((server) => server.key !== selectedKey);
-        sessionStorage.setItem("mcp-server-list", JSON.stringify(serverList));
-
-        let activeClients =
-          JSON.parse(sessionStorage.getItem("active-clients")) || [];
-        activeClients = activeClients.filter((key) => key !== selectedKey);
-        sessionStorage.setItem("active-clients", JSON.stringify(activeClients));
-
-        sessionStorage.removeItem("selected-mcp-key");
-
-        window.location.href = "index.html";
-      }
+      alert(`Failed to delete server: ${err.message}`);
     }
   });
 
@@ -197,10 +164,11 @@ document.addEventListener("DOMContentLoaded", () => {
   // 6. 초기 상태에서도 preview 동기화
   updateJsonPreview();
 
-  // 7. 선택된 MCP 값 불러오기 (비동기 방식으로 수정 필요!)
+  // 7. 선택된 MCP 값 불러오기 (스피너 로직 없음)
   (async () => {
     const selectedKey = sessionStorage.getItem("selected-mcp-key");
     if (selectedKey && window.mcpAPI?.getConfig) {
+      console.log("[DEBUG] Loading existing MCP config on page load. No loader should be active.");
       try {
         const config = await window.mcpAPI.getConfig();
         const server = config.mcpServers?.[selectedKey];

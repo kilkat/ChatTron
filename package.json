@@ -1,6 +1,6 @@
 {
   "name": "chattron",
-  "version": "0.0.10",
+  "version": "0.0.11",
   "description": "Electron Chat App For MCP Client",
   "main": "src/main/main.js",
   "scripts": {

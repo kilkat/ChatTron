@@ -64,54 +64,65 @@ async function handleStreamingResponse(response) {
 
     buffer += decoder.decode(value, { stream: true });
 
-    // SSE (Server-Sent Events) 형식 처리
+    // 스트리밍 데이터를 위해 줄 단위로 처리
     let newlineIndex;
     while ((newlineIndex = buffer.indexOf('\n')) !== -1) {
       const line = buffer.slice(0, newlineIndex).trim();
       buffer = buffer.slice(newlineIndex + 1);
 
+      if (line.length === 0) continue; // 빈 줄은 건너뛰기
+
+      let jsonStr = line;
+      // 1. SSE 형식 (data: ...) 처리
       if (line.startsWith('data: ')) {
-        const jsonStr = line.substring(6).trim();
-        if (jsonStr === '[DONE]') continue;
+        jsonStr = line.substring(6).trim();
+      }
+
+      if (jsonStr === '[DONE]') continue;
+
+      // 2. 일반 JSON 형식 처리 (Ollama 스트리밍 등)
+      if (jsonStr.startsWith('{') && jsonStr.endsWith('}')) {
         try {
           const parsed = JSON.parse(jsonStr);
+          // 스트리밍 응답에서 내용(content) 추출
           const content = parsed.choices?.[0]?.delta?.content ||
                          parsed.delta?.content ||
                          parsed.message?.content ||
                          parsed.content ||
                          '';
-          if (content) fullContent += content;
+          if (content) {
+            fullContent += content;
+          }
         } catch (e) {
-          console.warn("Malformed JSON in SSE stream ignored:", jsonStr);
+          console.warn("스트리밍 중 잘못된 JSON 라인 무시:", jsonStr);
         }
       }
     }
   }
 
-  // 스트림이 끝난 후 남은 버퍼 처리
+  // 3. 루프 종료 후 남은 버퍼 처리 (Ollama 일반 응답 등)
+  // 스트리밍이 아닌 경우, 전체 JSON이 여기에 담겨있게 됩니다.
   if (buffer.trim()) {
-    // 여러 JSON 객체가 붙어있는 경우를 대비해 분리 시도
-    const potentialJsons = buffer.trim().replace(/}\s*{/g, '}|--|{').split('|--|');
-    potentialJsons.forEach(jsonStr => {
-      try {
-        const parsed = JSON.parse(jsonStr);
-        const content = parsed.choices?.[0]?.message?.content ||
-                       parsed.choices?.[0]?.delta?.content ||
-                       parsed.delta?.content ||
-                       parsed.message?.content ||
-                       parsed.content ||
-                       parsed.response ||
-                       '';
-        if (content) fullContent += content;
-      } catch (e) {
-        // JSON 파싱 실패 시, 이미 처리된 내용이 없다면 그냥 텍스트로 추가
-        if (!fullContent) {
-            fullContent += buffer.trim();
-        }
+    const jsonStr = buffer.trim();
+    try {
+      const parsed = JSON.parse(jsonStr);
+      // 일반(non-stream) 응답에서 내용(content) 추출
+      const content = parsed.choices?.[0]?.message?.content || // OpenAI
+                     parsed.message?.content ||             // Ollama
+                     (Array.isArray(parsed.content) && parsed.content[0]?.text) || // Anthropic
+                     parsed.response ||                     // 구버전 Fallback
+                     '';
+      if (content) {
+        fullContent += content;
       }
-    });
+    } catch (e) {
+      console.error("최종 버퍼 파싱 실패:", e);
+      // JSON 파싱에 실패했지만 아직 내용이 없다면, 일반 텍스트로 간주
+      if (!fullContent) {
+        fullContent = buffer.trim();
+      }
+    }
   }
-
   return fullContent;
 }
 
