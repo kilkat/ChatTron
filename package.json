@@ -6,7 +6,9 @@
   "scripts": {
     "start": "electron .",
     "dev:css": "tailwindcss -i ./src/renderer/styles.css -o ./public/output.css --watch",
-    "build": "electron-builder"
+    "build": "electron-builder",
+    "build:linux": "electron-builder --linux",
+    "build:win": "electron-builder --win"
   },
   "build": {
     "appId": "com.kilkat.chattron",
@@ -31,6 +33,15 @@
       "allowToChangeInstallationDirectory": true,
       "installerIcon": "assets/favicon/logo_256.ico",
       "uninstallerIcon": "assets/favicon/logo_256.ico"
+    },
+    "linux": {
+      "target": [
+        "AppImage",
+        "deb",
+        "rpm"
+      ],
+      "icon": "assets/favicon/logo.png",
+      "category": "Utility"
     }
   },
   "repository": {
@@ -38,7 +49,7 @@
     "url": "git+https://github.com/kilkat/ChatTron.git"
   },
   "keywords": [],
-  "author": "",
+  "author": "Kilkat <pentest.kilkat@gmail.com>",
   "license": "ISC",
   "bugs": {
     "url": "https://github.com/kilkat/ChatTron/issues"
